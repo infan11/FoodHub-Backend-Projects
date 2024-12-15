@@ -1,11 +1,10 @@
 const express = require('express');
 const cors = require('cors');
 const app = express();
-
 require("dotenv").config();
 const { MongoClient, ServerApiVersion } = require('mongodb');
 const port = process.env.PORT || 5000;
-
+const jwt = require("jsonwebtoken")
 // MIDDLEWERE
 app.use(express.json())
 app.use(cors());
@@ -25,7 +24,19 @@ async function run() {
     try {
         // Connect the client to the server	(optional starting in v4.7)
 
-        const usersCollection = client.db("FOODHUB").collection("users")
+        const usersCollection = client.db("FOODHUB").collection("users");
+        const ownerProfileCollection = client.db("FOODHUB").collection("ownerProfile");
+        // token create
+        app.post("/jwt", async (req, res) => {
+        const user = req.body;
+        const token = jwt.sign(user , process.env.JWT_WEB_TOKEN , {expiresIn : "1hr"})
+        res.send({token})
+        });
+        
+
+
+
+
         app.get("/users", async (req, res) => {
             const result = await usersCollection.find().toArray();
             res.send(result)
@@ -33,6 +44,11 @@ async function run() {
         app.post("/users", async (req, res) => {
             const user = req.body;
             const result = await usersCollection.insertOne(user);
+            res.send(result)
+        })
+        app.post("/ownerProfile", async (req, res) => {
+            const ownerProfile = req.body;
+            const result = await ownerProfileCollection.insertOne(ownerProfile);
             res.send(result)
         })
         // Send a ping to confirm a successful connection
@@ -48,6 +64,6 @@ run().catch(console.dir);
 app.get("/", (req, res) => {
     res.send("FOODHUB server is running")
 })
-app.listen( port,() => {
+app.listen(port, () => {
     console.log(`Signnel crud server ${port}`);
 })
