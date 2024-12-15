@@ -32,7 +32,12 @@ async function run() {
         const token = jwt.sign(user , process.env.JWT_WEB_TOKEN , {expiresIn : "1hr"})
         res.send({token})
         });
-        
+    const verifyToken = (req, res , next) => {
+        console.log("Verify Token" , req.headers.authorization);
+        if(!req.headers.authorization){
+            return res.status(401).send({error })
+        }
+    }
 
 
 
