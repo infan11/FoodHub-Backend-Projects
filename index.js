@@ -55,6 +55,18 @@ async function run() {
             console.log(result);
             res.send(result) 
         })
+        // user verify admin 
+        app.patch("/users/admin/:id" , async (req, res) => {
+            const id = req.params.id;
+            const filter = { _id : new ObjectId(id)}
+            const updateDoc = {
+                $set : {
+                    role : "admin"
+                }
+            }
+            const result = await  usersCollection.updateOne(filter , updateDoc)
+            res.send(result);
+        })
         app.post("/ownerProfile", async (req, res) => {
             const ownerProfile = req.body;
             const result = await ownerProfileCollection.insertOne(ownerProfile);
