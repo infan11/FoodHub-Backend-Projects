@@ -55,17 +55,21 @@ async function run() {
             console.log(result);
             res.send(result) 
         })
+        
         // user verify admin 
         app.patch("/users/admin/:id" , async (req, res) => {
             const id = req.params.id;
+            console.log(id);
             const filter = { _id : new ObjectId(id)}
+            console.log(filter);
             const updateDoc = {
                 $set : {
                     role : "admin"
                 }
             }
             const result = await  usersCollection.updateOne(filter , updateDoc)
-            res.send(result);
+            console.log(result);
+            res.send(result)
         })
         app.post("/ownerProfile", async (req, res) => {
             const ownerProfile = req.body;
