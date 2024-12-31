@@ -26,6 +26,7 @@ async function run() {
 
         const usersCollection = client.db("FOODHUB").collection("users");
         const ownerUsersCollection = client.db("FOODHUB").collection("ownerUsers");
+        const foodsCollection = client.db("FOODHUB").collection("foods");
         // token create
         app.post("/jwt", async (req, res) => {
             const user = req.body;
@@ -106,7 +107,7 @@ async function run() {
         });
 
 
-        app.get("/users", verifyToken, verifyAdmin,  async (req, res) => {
+        app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
             const result = await usersCollection.find().toArray();
             res.send(result)
         })
@@ -168,7 +169,7 @@ async function run() {
             }
             res.send({ restaurantOwner })
         })
-        app.get("/ownerUsers", verifyToken, verifyAdmin,  async (req, res) => {
+        app.get("/ownerUsers", verifyToken, verifyAdmin, async (req, res) => {
             const result = await ownerUsersCollection.find().toArray();
             res.send(result)
         })
@@ -196,6 +197,23 @@ async function run() {
             }
             const result = await ownerUsersCollection.updateOne(filter, updateDoc)
             console.log(result);
+            res.send(result)
+        })
+        // Foods Related  api 
+        app.get("/foods", async (req, res) => {
+            const result = await foodsCollection.find().toArray();
+            res.send(result)
+        })
+        app.post("/foods", async (req, res) => {
+            const addFood = req.body;
+            const result = await foodsCollection.insertOne(addFood);
+            console.log(result);
+            res.send(result);
+        })
+        app.delete("/foods/:id" , async (req, res ) =>{
+            const id = req.params.id;
+            const query = {_id : new ObjectId(id)};
+            const result = await foodsCollection.deleteOne(query);
             res.send(result)
         })
         // Send a ping to confirm a successful connection
