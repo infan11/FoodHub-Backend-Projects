@@ -78,7 +78,7 @@ async function run() {
             }
             next();
         }
-        app.get("/users/admin/:email", verifyToken, verifyAdmin, async (req, res) => {
+        app.get("/users/admin/:email", verifyToken, async (req, res) => {
             const email = req.params.email;
             if (email !== req.decoded.email) {
                 return res.status(403).send({ message: "forbidden access" });
@@ -101,22 +101,39 @@ async function run() {
             const user = await usersCollection.findOne(query);
             let moderator = false;
             if (user) {
-                moderator = user?.roleTwo === "moderator"
+                moderator = user?.role === "moderator"
             }
             res.send({ moderator });
         });
 
 
-        app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
+        app.get("/users", verifyToken, verifyAdmin, verifyModerator, async (req, res) => {
             const result = await usersCollection.find().toArray();
             res.send(result)
         })
-        app.post("/users", async (req, res) => {
+        // app.post("/users", async (req, res) => {
+        //     const user = req.body;
+        //     const result = await usersCollection.insertOne(user);
+        //     res.send(result)
+        // })
+        app.put("/users", async (req, res) => {
             const user = req.body;
-            const result = await usersCollection.insertOne(user);
+            const query = { email: user?.email }
+            const isExists = await usersCollection.findOne(query)
+            if (isExists) return res.send(isExists)
+            const options = { upsert: true }
+
+            const updateDoc = {
+                $set: {
+                    ...user,
+                    timestemp: Date.now(),
+                }
+
+            }
+            const result = await usersCollection.updateOne(query, updateDoc, options)
             res.send(result)
         })
-        app.delete("/users/:id", verifyToken, verifyAdmin, async (req, res) => {
+        app.delete("/users/:id", verifyToken, async (req, res) => {
             const id = req.params.id;
             const query = { _id: new ObjectId(id) }
             const result = await usersCollection.deleteOne(query);
@@ -140,14 +157,14 @@ async function run() {
             res.send(result)
         })
 
-        app.patch("/users/moderator/:id", verifyToken, async (req, res) => {
+        app.patch("/users/moderator/:id", verifyToken, verifyAdmin, async (req, res) => {
             const id = req.params.id;
             console.log(id);
             const filter = { _id: new ObjectId(id) }
             console.log(filter);
             const updateDoc = {
                 $set: {
-                    roleTwo: "moderator"
+                    role: "moderator"
                 }
             }
             const result = await usersCollection.updateOne(filter, updateDoc)
@@ -155,6 +172,20 @@ async function run() {
             res.send(result)
         })
         // ownerUsers
+        // app.get("/users/moderator/:email", verifyToken,async (req, res) => {
+        //     const email = req.params.email;
+        //     if (email !== req.decoded.email) {
+        //         return res.status(403).send({ message: "forbidden access" });
+        //     }
+        //     const query = { email: email };
+        //     const user = await usersCollection.findOne(query);
+        //     let moderator = false;
+        //     if (user) {
+        //         moderator = user?.role === "moderator"
+        //     }
+        //     res.send({ moderator });
+        // });
+
         app.get("/ownerUsers/restaurantOwner/:email", verifyToken, async (req, res) => {
             const email = req.params.email;
             if (email !== req.decoded.email) {
@@ -165,11 +196,11 @@ async function run() {
             const ownerUsers = ownerUser?.position === "restaurantOwner";
             let restaurantOwner = false;
             if (ownerUsers) {
-                restaurantOwner = ownerUser.position === "restaurantOwner"
+                restaurantOwner = ownerUser?.position === "restaurantOwner"
             }
             res.send({ restaurantOwner })
         })
-        app.get("/ownerUsers", verifyToken, verifyAdmin, async (req, res) => {
+        app.get("/ownerUsers", verifyToken, verifyAdmin,verifyModerator, verifyToken, async (req, res) => {
             const result = await ownerUsersCollection.find().toArray();
             res.send(result)
         })
@@ -200,7 +231,7 @@ async function run() {
             res.send(result)
         })
         // Foods Related  api 
-        app.get("/foods", async (req, res) => {
+        app.get("/foods", verifyToken, verifyAdmin , verifyModerator,verifyOwner, async (req, res) => {
             const result = await foodsCollection.find().toArray();
             res.send(result)
         })
@@ -210,9 +241,9 @@ async function run() {
             console.log(result);
             res.send(result);
         })
-        app.delete("/foods/:id" , async (req, res ) =>{
+        app.delete("/foods/:id", async (req, res) => {
             const id = req.params.id;
-            const query = {_id : new ObjectId(id)};
+            const query = { _id: new ObjectId(id) };
             const result = await foodsCollection.deleteOne(query);
             res.send(result)
         })
