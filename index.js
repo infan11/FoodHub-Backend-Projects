@@ -62,7 +62,7 @@ async function run() {
             const email = req.decoded.email;
             const query = { email: email };
             const user = await usersCollection.findOne(query);
-            const isModerator = user?.roleTwo === "moderator";
+            const isModerator = user?.role === "moderator";
             if (!isModerator) {
                 return res.status(403).send({ message: "forbidden access" })
             }
@@ -92,7 +92,7 @@ async function run() {
             res.send({ admin })
         });
 
-        app.get("/users/moderator/:email", verifyToken, async (req, res) => {
+        app.get("/users/moderator/:email", verifyToken,async (req, res) => {
             const email = req.params.email;
             if (email !== req.decoded.email) {
                 return res.status(403).send({ message: "forbidden access" });
@@ -107,15 +107,11 @@ async function run() {
         });
 
 
-        app.get("/users", verifyToken, verifyAdmin, verifyModerator, async (req, res) => {
+        app.get("/users", verifyToken, verifyAdmin,  async (req, res) => {
             const result = await usersCollection.find().toArray();
             res.send(result)
         })
-        // app.post("/users", async (req, res) => {
-        //     const user = req.body;
-        //     const result = await usersCollection.insertOne(user);
-        //     res.send(result)
-        // })
+
         app.put("/users", async (req, res) => {
             const user = req.body;
             const query = { email: user?.email }
@@ -186,7 +182,7 @@ async function run() {
         //     res.send({ moderator });
         // });
 
-        app.get("/ownerUsers/restaurantOwner/:email", verifyToken, async (req, res) => {
+        app.get("/ownerUsers/restaurantOwner/:email", verifyToken, verifyAdmin ,verifyModerator,async (req, res) => {
             const email = req.params.email;
             if (email !== req.decoded.email) {
                 return res.status(403).send({ message: " forbidden access" })
@@ -200,7 +196,7 @@ async function run() {
             }
             res.send({ restaurantOwner })
         })
-        app.get("/ownerUsers", verifyToken, verifyAdmin,verifyModerator, verifyToken, async (req, res) => {
+        app.get("/ownerUsers", verifyToken, async (req, res) => {
             const result = await ownerUsersCollection.find().toArray();
             res.send(result)
         })
@@ -231,7 +227,7 @@ async function run() {
             res.send(result)
         })
         // Foods Related  api 
-        app.get("/foods", verifyToken, verifyAdmin , verifyModerator,verifyOwner, async (req, res) => {
+        app.get("/foods", verifyToken, verifyAdmin, verifyModerator, verifyOwner, async (req, res) => {
             const result = await foodsCollection.find().toArray();
             res.send(result)
         })
