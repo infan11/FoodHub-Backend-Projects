@@ -68,17 +68,8 @@ async function run() {
             }
             next();
         }
-        const verifyOwner = async (req, res, next) => {
-            const email = req.decoded.email; 
-            const query = { email: email };
-            const user = await usersCollection.findOne(query);
-            const isOwner = user?.role === "restaurantOwner";
-            if (!isOwner) {
-                return res.status(403).send({ message: "forbidden access" });
-            }
-            next();
-        };
-        app.get("/users/admin/:email", verifyToken, verifyAdmin,async (req, res) => {
+
+        app.get("/users/admin/:email", verifyToken, verifyAdmin, async (req, res) => {
             const email = req.params.email;
             if (email !== req.decoded.email) {
                 return res.status(403).send({ message: "forbidden access" });
@@ -99,19 +90,22 @@ async function run() {
             }
             const query = { email: email };
             const user = await usersCollection.findOne(query);
-            let moderator = false;
-            if (user) {
-                moderator = user?.role === "moderator"
+            if (user?.role === "moderator") {
+                return res.send({ moderator: true });
             }
-            res.send({ moderator });
+            res.send({ moderator: false });
         });
 
-
-        app.get("/users", verifyToken, verifyAdmin,  verifyModerator, async (req, res) => {
+        app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
             const result = await usersCollection.find().toArray();
             res.send(result)
         })
-
+// app.post("/users" , async (req, res) => {
+//     const userInfo = req.body;
+//     const result = await usersCollection.insertOne(userInfo);
+//     console.log(result);
+//     res.send(result)
+// })
         app.put("/users", async (req, res) => {
             const user = req.body;
             const query = { email: user?.email }
@@ -167,51 +161,60 @@ async function run() {
             console.log(result);
             res.send(result)
         })
-   
 
-        app.get("/users/restaurantOwner/:email", verifyToken, verifyAdmin, async (req, res) => {
-            const email = req.params.email;
+        const verifyOwner = async (req, res, next) => {
+            const email = req.decoded.email;
             const query = { email: email };
-            const ownerUser = await usersCollection.findOne(query);
-        
-            // Debugging logs
-            console.log("Query Result:", ownerUser);
-        
-            const restaurantOwner = ownerUser?.role === "restaurantOwner";
-            console.log("Is Restaurant Owner:", restaurantOwner);
-        
-            res.send({ restaurantOwner });
+            const user = await usersCollection.findOne(query);
+            const isOwner = user?.role === "owner";
+            if (isOwner) {
+                return res.status(403).send({ message: "forbidden access" })
+            }
+            next()
+        }
+        app.get("/users/restaurantOwner/:email", verifyToken, async (req, res) => {
+            const email = req.params.email;
+            if (email !== req.decoded.email) {
+                return res.status(403).send({ message: "forbidden access" });
+            }
+            const query = { email: email };
+            const user = await usersCollection.findOne(query);
+            let owner = false;
+            if (user) {
+                owner = user.role === "owner";
+            }
+            res.send({ owner });
         });
-      
+
         app.patch("/users/restaurantOwner/:id", verifyToken, verifyAdmin, async (req, res) => {
             const id = req.params.id;
-            console.log(id);
+            console.log("owner id", id);
             const filter = { _id: new ObjectId(id) }
-            console.log(filter);
+            console.log("owner " , filter);
             const updateDoc = {
-                $set: {
-                    role: "restaurantOwner"
+                $set : {
+                    role : "owner"
                 }
             }
-            const result = await usersCollection.updateOne(filter, updateDoc)
-            console.log(result);
+            const result = await usersCollection.updateOne(filter , updateDoc)
+            console.log("owner result" , result);
             res.send(result)
         })
-        app.put("/users", async (req, res) => {
-            const ownerUser = req.body;
-            const query = { email: ownerUser?.email };
-            const isExists = await usersCollection.findOne(query);
-            if (isExists) return res.send(isExists)
-            const options = { upsert: true }
-            const updateDoc = {
-                $set: {
-                    ...ownerUser,
-                    timestemp: Date.now()
-                }
-            }
-            const result = await usersCollection.updateOne(query, updateDoc, options)
-            res.send(result)
-        })
+        // app.put("/users", async (req, res) => {
+        //     const ownerUser = req.body;
+        //     const query = { email: ownerUser?.email };
+        //     const isExists = await usersCollection.findOne(query);
+        //     if (isExists) return res.send(isExists)
+        //     const options = { upsert: true }
+        //     const updateDoc = {
+        //         $set: {
+        //             ...ownerUser,
+        //             timestemp: Date.now()
+        //         }
+        //     }
+        //     const result = await usersCollection.updateOne(query, updateDoc, options)
+        //     res.send(result)
+        // })
         // app.delete("/users/:id", verifyToken, verifyAdmin, async (req, res) => {
         //     const id = req.params.id;
         //     const query = { _id: new ObjectId(id) }
@@ -226,7 +229,7 @@ async function run() {
 
 
 
-       
+
         // Foods Related  api 
         app.get("/foods", verifyToken, verifyAdmin, verifyModerator, verifyOwner, async (req, res) => {
             const result = await foodsCollection.find().toArray();
