@@ -25,7 +25,7 @@ async function run() {
         // Connect the client to the server	(optional starting in v4.7)
 
         const usersCollection = client.db("FOODHUB").collection("users");
-        // const usersCollection = client.db("FOODHUB").collection("users");
+        const restaurantUploadCollection = client.db("FOODHUB").collection("restaurantUpload");
         const foodsCollection = client.db("FOODHUB").collection("foods");
         // token create
         app.post("/jwt", async (req, res) => {
@@ -83,7 +83,7 @@ async function run() {
             res.send({ admin })
         });
 
-        app.get("/users/moderator/:email", verifyToken, async (req, res) => {
+        app.get("/users/moderator/:email", verifyToken, verifyModerator, async (req, res) => {
             const email = req.params.email;
             if (email !== req.decoded.email) {
                 return res.status(403).send({ message: "forbidden access" });
@@ -100,12 +100,12 @@ async function run() {
             const result = await usersCollection.find().toArray();
             res.send(result)
         })
-// app.post("/users" , async (req, res) => {
-//     const userInfo = req.body;
-//     const result = await usersCollection.insertOne(userInfo);
-//     console.log(result);
-//     res.send(result)
-// })
+        // app.post("/users" , async (req, res) => {
+        //     const userInfo = req.body;
+        //     const result = await usersCollection.insertOne(userInfo);
+        //     console.log(result);
+        //     res.send(result)
+        // })
         app.put("/users", async (req, res) => {
             const user = req.body;
             const query = { email: user?.email }
@@ -116,6 +116,8 @@ async function run() {
             const updateDoc = {
                 $set: {
                     ...user,
+
+                    isNew: user.restaurantAdddress && user.restaurantNumber ? true : false,
                     timestemp: Date.now(),
                 }
 
@@ -123,7 +125,7 @@ async function run() {
             const result = await usersCollection.updateOne(query, updateDoc, options)
             res.send(result)
         })
-        app.delete("/users/:id", verifyToken, async (req, res) => {
+        app.delete("/users/:id", verifyToken, verifyAdmin, async (req, res) => {
             const id = req.params.id;
             const query = { _id: new ObjectId(id) }
             const result = await usersCollection.deleteOne(query);
@@ -190,14 +192,14 @@ async function run() {
             const id = req.params.id;
             console.log("owner id", id);
             const filter = { _id: new ObjectId(id) }
-            console.log("owner " , filter);
+            console.log("owner ", filter);
             const updateDoc = {
-                $set : {
-                    role : "owner"
+                $set: {
+                    role: "owner"
                 }
             }
-            const result = await usersCollection.updateOne(filter , updateDoc)
-            console.log("owner result" , result);
+            const result = await usersCollection.updateOne(filter, updateDoc)
+            console.log("owner result", result);
             res.send(result)
         })
         // app.put("/users", async (req, res) => {
@@ -227,8 +229,14 @@ async function run() {
         //     res.send(result)
         // })
 
-
-
+        /// Restaurant info 
+      
+        app.post("/restaurantUpload", async (req, res) => {
+            const addFood = req.body;
+            const result = await restaurantUploadCollection.insertOne(addFood);
+            console.log(result);
+            res.send(result);
+        })
 
         // Foods Related  api 
         app.get("/foods", verifyToken, verifyAdmin, verifyModerator, verifyOwner, async (req, res) => {
