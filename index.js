@@ -230,25 +230,31 @@ async function run() {
         // })
 
         /// Restaurant info 
-      
-        app.post("/restaurantUpload", async (req, res) => {
+      app.get("/restaurantUpload" , async (req, res) => {
+        const result = await restaurantUploadCollection.find().toArray();
+        res.send(result)
+      })
+      app.get("/restaurantUpload/:name"  , async (req , res) => {
+        const name = req.params.name;
+        const query = {name : new ObjectId(name)}
+        const result = await restaurantUploadCollection.findOne(query);
+        res.send(result)
+      })
+        app.post("/restaurantUpload", async (req, res)   => {
             const addFood = req.body;
             const result = await restaurantUploadCollection.insertOne(addFood);
             console.log(result);
             res.send(result);
         })
+     
+
 
         // Foods Related  api 
         app.get("/foods", verifyToken, verifyAdmin, verifyModerator, verifyOwner, async (req, res) => {
             const result = await foodsCollection.find().toArray();
             res.send(result)
         })
-        app.post("/foods", async (req, res) => {
-            const addFood = req.body;
-            const result = await foodsCollection.insertOne(addFood);
-            console.log(result);
-            res.send(result);
-        })
+      
         app.delete("/foods/:id", async (req, res) => {
             const id = req.params.id;
             const query = { _id: new ObjectId(id) };
