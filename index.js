@@ -234,12 +234,8 @@ async function run() {
         const result = await restaurantUploadCollection.find().toArray();
         res.send(result)
       })
-      app.get("/restaurantUpload/:name"  , async (req , res) => {
-        const name = req.params.name;
-        const query = {name : new ObjectId(name)}
-        const result = await restaurantUploadCollection.findOne(query);
-        res.send(result)
-      })
+  
+
         app.post("/restaurantUpload", async (req, res)   => {
             const addFood = req.body;
             const result = await restaurantUploadCollection.insertOne(addFood);
@@ -247,7 +243,24 @@ async function run() {
             res.send(result);
         })
      
-
+        app.get("/restaurantUpload/:restaurantName" , async (req, res) => {
+            const restaurantName = req.params.restaurantName;
+            const query = {restaurantName : restaurantName};
+            const result = await restaurantUploadCollection.findOne(query);
+            res.send(result)
+        })
+        app.put("/restaurantUpload/:restaurantName" , async (req, res) => {
+            const restaurantName = req.params.restaurantName;
+            const foodInfo = req.body
+            const query = {restaurantName : restaurantName};
+            const updateDoc = {
+                $push : {
+                    restaurantName :foodInfo 
+                }
+            }
+            const result = await restaurantUploadCollection.updateOne(query,updateDoc)
+            res.send(result);
+         })
 
         // Foods Related  api 
         app.get("/foods", verifyToken, verifyAdmin, verifyModerator, verifyOwner, async (req, res) => {
