@@ -243,19 +243,19 @@ async function run() {
             res.send(result);
         })
      
-        app.get("/restaurantUpload/:restaurantName" , async (req, res) => {
-            const restaurantName = req.params.restaurantName;
-            const query = {restaurantName : restaurantName};
+        app.get("/restaurantUpload/:id" , async (req, res) => {
+            const id = req.params.id;
+            const query = {_id : ObjectId(id)};
             const result = await restaurantUploadCollection.findOne(query);
-            res.send(result)
+             res.send(result)
         })
-        app.put("/restaurantUpload/:restaurantName" , async (req, res) => {
-            const restaurantName = req.params.restaurantName;
+        app.patch("/restaurantUpload/:id" , async (req, res) => {
+            const id = req.params.id;
             const foodInfo = req.body
-            const query = {restaurantName : restaurantName};
+            const query = {_id : new ObjectId(id)};
             const updateDoc = {
                 $push : {
-                    restaurantName :foodInfo 
+                    restaurantId :foodInfo 
                 }
             }
             const result = await restaurantUploadCollection.updateOne(query,updateDoc)
