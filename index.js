@@ -249,6 +249,7 @@ async function run() {
             const result = await restaurantUploadCollection.findOne(query);
              res.send(result)
         })
+
         app.patch("/restaurantUpload/:id" , async (req, res) => {
             const id = req.params.id;
             const foodInfo = req.body
@@ -259,7 +260,7 @@ async function run() {
                 }
             }
             const result = await restaurantUploadCollection.updateOne(query,updateDoc)
-            res.send(result);
+            res.send(result)
          })
 
         // Foods Related  api 
