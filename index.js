@@ -27,11 +27,11 @@ const client = new MongoClient(uri, {
 
 async function run() {
     try {
-     
+
 
         const usersCollection = client.db("FOODHUB").collection("users");
         const restaurantUploadCollection = client.db("FOODHUB").collection("restaurantUpload");
-        const foodsCollection = client.db("FOODHUB").collection("foods");
+        // const foodsCollection = client.db("FOODHUB").collection("foods");
         const addFoodCollection = client.db("FOODHUB").collection("addFood");
         const paymentCollection = client.db("FOODHUB").collection("payment");
         const districtCollection = client.db("FOODHUB").collection("districtAvailable");
@@ -133,20 +133,20 @@ async function run() {
             const user = req.body;
             const query = { email: user?.email };
             const isExists = await usersCollection.findOne(query);
-          
+
             const options = { upsert: true };
             const updateDoc = {
-              $set: {
-                ...user,
-                isNew: user.restaurantAdddress && user.restaurantNumber ? true : false,
-                timestemp: Date.now(),
-              }
+                $set: {
+                    ...user,
+                    isNew: user.restaurantAdddress && user.restaurantNumber ? true : false,
+                    timestemp: Date.now(),
+                }
             };
-          
+
             const result = await usersCollection.updateOne(query, updateDoc, options);
             res.send(result);
-          });
-          
+        });
+
         app.delete("/users/:id", verifyToken, verifyAdmin, async (req, res) => {
             const id = req.params.id;
             const query = { _id: new ObjectId(id) }
@@ -255,9 +255,9 @@ async function run() {
             const result = await restaurantUploadCollection.findOne(query);
             res.send(result)
         })
-        app.get("/restaurantUpload/:districtName" , async (req, res) => {
+        app.get("/restaurantUpload/:districtName", async (req, res) => {
             const districtName = req.params.districtName;
-            const query = {districtName : districtName};
+            const query = { districtName: districtName };
             const result = await restaurantUploadCollection.find(query).toArray();
             console.log(result);
             res.send(result);
@@ -268,7 +268,7 @@ async function run() {
             const result = await restaurantUploadCollection.findOne(query);
             res.send(result);
         });
-        
+
         app.get("/restaurantUpload/district/:districtName", async (req, res) => {
             const districtName = req.params.districtName;
             const query = { districtName: districtName };
@@ -276,7 +276,7 @@ async function run() {
             console.log(result);
             res.send(result);
         });
-        
+
         app.delete("/restaurantUpload/:restaurantName", async (req, res) => {
             const restaurantName = req.params.restaurantName;
             const query = { restaurantName: restaurantName }
@@ -308,7 +308,7 @@ async function run() {
             const result = await restaurantUploadCollection.updateOne(query, updateDoc);
             res.send(result);
         });
-        
+
 
         // Foods Related  api 
         app.get("/foods", verifyToken, verifyAdmin, verifyModerator, verifyOwner, async (req, res) => {
@@ -324,170 +324,171 @@ async function run() {
         })
 
         // SSL Commerce Payment Intent
-        app.post("/create-ssl-payment", async (req, res) => {
-        
-                const payment = req.body;
-                console.log("Received Payment Data:", payment);
-        
-                const trxid = new ObjectId().toString(); 
-                payment.transactionId = trxid;
-                const initiatePayment = {
-                    store_id: process.env.SSL_COMMERCE_SECRET_ID,
-                    store_passwd: process.env.SSL_COMMERCE_SECRET_PASS,
-                    total_amount: parseFloat(payment.foodPrice),
-                    currency: "BDT",
-                    tran_id: trxid,
-                    success_url: "http://localhost:5173/dashboard/paymentHistory",
-                    fail_url: "http://localhost:5173/dashboard/fail",
-                    cancel_url: "http://localhost:5173/dashboard/cancel",
-                    ipn_url: "http://localhost:5173/dashboard/ipn-success-payment",
-                    shipping_method: "Courier",
-                    product_name: payment.foodName || "Unknown",
-                    product_category: payment.category || "General",
-                    product_profile: "general",
-                    cus_name: payment.customerName || "Customer",
-                    cus_email: payment.email || "customer@example.com",
-                    cus_add1: payment.address || "Unknown Address",
-                    cus_city: payment.district || "Unknown City",
-                    cus_country: "Bangladesh",
-                    cus_phone: payment.contactNumber || "01700000000",
-                    ship_name: payment.customerName || "Customer",
-                    ship_add1: payment.address || "Unknown Address",
-                    ship_city: payment.district || "Unknown City",
-                    ship_country: "Bangladesh",
-                    ship_postcode: '4700'
-                };
-          
-                console.log("Sending Payment Request:", initiatePayment);
-        
-                const inResponse = await axios.post(
-                    "https://sandbox.sslcommerz.com/gwprocess/v4/api.php",
-                    new URLSearchParams(initiatePayment).toString(), // Ensure correct encoding
-                    {
-                        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                    }
-                );
-                const saveData = await paymentCollection.insertOne(payment)
-                const gatewayPageURL = inResponse?.data?.GatewayPageURL;
-                res.send({gatewayPageURL})
-           
-           
+        app.post("/create-ssl-payment", verifyToken, async (req, res) => {
+
+            const payment = req.body;
+            console.log("Received Payment Data:", payment);
+
+            const trxid = new ObjectId().toString();
+            payment.transactionId = trxid;
+            const initiatePayment = {
+                store_id: process.env.SSL_COMMERCE_SECRET_ID,
+                store_passwd: process.env.SSL_COMMERCE_SECRET_PASS,
+                total_amount: parseFloat(payment.foodPrice),
+                currency: "BDT",
+                tran_id: trxid,
+                success_url: "http://localhost:5173/dashboard/paymentHistory",
+                fail_url: "http://localhost:5173/dashboard/fail",
+                cancel_url: "http://localhost:5173/dashboard/cancel",
+                ipn_url: "http://localhost:5173/dashboard/ipn-success-payment",
+                shipping_method: "Courier",
+                product_name: payment.foodName || "Unknown",
+                product_category: payment.category || "General",
+                product_profile: "general",
+                cus_name: payment.customerName || "Customer",
+                cus_email: payment.email || "customer@example.com",
+                cus_add1: payment.address || "Unknown Address",
+                cus_city: payment.district || "Unknown City",
+                cus_country: "Bangladesh",
+                cus_phone: payment.contactNumber || "01700000000",
+                ship_name: payment.customerName || "Customer",
+                ship_add1: payment.address || "Unknown Address",
+                ship_city: payment.district || "Unknown City",
+                ship_country: "Bangladesh",
+                ship_postcode: '4700'
+            };
+
+            // console.log("Sending Payment Request:", initiatePayment);
+
+            const inResponse = await axios.post(
+                "https://sandbox.sslcommerz.com/gwprocess/v4/api.php",
+                new URLSearchParams(initiatePayment).toString(), // Ensure correct encoding
+                {
+                    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                }
+            );
+            const saveData = await paymentCollection.insertOne(payment)
+            const gatewayPageURL = inResponse?.data?.GatewayPageURL;
+            res.send({ gatewayPageURL })
+
+
             // console.log(gatewayPageURL); 
-            });
-            app.post("/success-payment", async (req, res) => {
-                try {
-                    const paymentHistory = req.body;
-                    console.log(" Payment success data received:", paymentHistory);
-            
-                    const validationURL = `https://sandbox.sslcommerz.com/validator/api/validationserverAPI.php?val_id=${paymentHistory.val_id}&store_id=foodh67aed7546ec54&store_passwd=foodh67aed7546ec54@ssl&format=json`;
-            
-                    const { data } = await axios.get(validationURL);
-                    console.log("🔍 Validation response from SSLCommerz:", data);
-            
-                    // Ensure payment is valid
-                    if (data.status !== "VALID" && data.status !== "VALIDATED") {
-                        return res.send({ message: "Invalid Payment" });
-                    }
-            
-                    // Check if the transaction exists in the database
-                    const payment = await paymentCollection.findOne({ transactionId: data.tran_id });
-            
-                    if (!payment) {
-                        return res.send({ message: "Transaction ID not found in database!" });
-                    }
-            
-                    // Update payment status to "success"
-                    const updatePayment = await paymentCollection.updateOne(
-                        { transactionId: data.tran_id },
-                        { $set: { status: "success" } }
-                    );
-            
-                    if (updatePayment.modifiedCount === 0) {
-                        return res.send({ message: "Payment update failed!" });
-                    }
-        
-                    console.log("Payment status updated successfully!");
-                    const deletedResult = await  addFoodCollection.deleteMany(query);
-                    res.send(deletedResult)
-                    // // Redirect user to success page
-                    res.redirect("http://localhost:5173/dashboard/paymentHistory");
-                } catch (error) {
-                    console.error(" Error in processing payment success:", error);
-                    res.status(500).send({ error: "Internal Server Error" });
+        });
+        app.get("/success-payment", async (req, res) => {
+            try {
+                const { val_id, tran_id } = req.query;
+                if (!val_id) {
+                    return res.status(400).send("val_id missing");
                 }
-            });
-            // Import express and MongoDB client before this snippet
-// Assume 'client' is your connected MongoDB client
 
-app.get('/payments', verifyToken, async (req, res) => {
-    try {
-      const email = req.query.email;
-      if (!email) {
-        return res.status(400).json({ error: "Email query parameter is required" });
-      }
-      const payments = await paymentCollection
-        .find({ email })
-        .sort({ date: -1 })  
-        .toArray();
-  
-      res.json(payments);
-    } catch (err) {
-      console.error("Error fetching payments:", err);
-      res.status(500).json({ error: "Internal server error" });
-    }
-  });
-  
-            app.post('/create-payment-intent', async (req, res) => {
-                try {
-                    const { price } = req.body;
-                    if (!price) {
-                        return res.status(400).json({ error: "Price is required" });
-                    }
-                    const amount = parseInt(price * 100); // Convert to cents
-                    console.log("Creating PaymentIntent with amount:", amount);
-                    
-                    const paymentIntent = await stripe.paymentIntents.create({
-                        amount: amount,
-                        currency: "usd",
-                        payment_method_types: ['card'],
-                    });
-                    
-                    console.log("Client Secret Sent:", paymentIntent.client_secret);
-                    res.json({ clientSecret: paymentIntent.client_secret });
-                    
-                } catch (error) {
-                    console.error("Payment Intent Error:", error);
-                    res.status(500).json({ error: error.message });
+                const validationURL = `https://sandbox.sslcommerz.com/validator/api/validationserverAPI.php?val_id=${val_id}&store_id=foodh67aed7546ec54&store_passwd=foodh67aed7546ec54@ssl&format=json`;
+
+                const { data } = await axios.get(validationURL);
+                //   console.log("🔍 SSLCommerz Validation Response:", data);
+
+                if (data.status !== "VALID" && data.status !== "VALIDATED") {
+                    // return res.status(400).send({ message: "❌ Invalid Payment" });
                 }
-            });
 
-              app.get("/payments/:email", async (req, res) => {
-                const query = { email: req.params.email }
-                // if (req.params.email !== req.decoded.email) {
-                //   return res.status(403).send({ message: "forbidden access" })
-                // }
-                const result = await paymentCollection.find(query).toArray()
-                res.send(result)
-              })
-              app.post("/payments", async (req, res) => {
-                const payment = req.body;
-                const paymentResult = await paymentCollection.insertOne(payment);
-                const query = {
-                  _id: {
-                    $in: payment.cartFoodId.map(id => new ObjectId(id))
-                  }
-                };
-                const deletedResult = await  addFoodCollection.deleteMany(query);
-                res.send({ paymentResult, deletedResult });
-          
-              });
-          
-              app.delete("/payments/:id" , async (req, res) => {
-                const id = req.params.id;
-                const query = {_id : new ObjectId(id)}
-                const result = await paymentCollection.deleteOne(query)
-                res.send(result)
-              })
+                const payment = await paymentCollection.findOne({ transactionId: tran_id });
+                //   if (!payment) return res.status(404).send({ message: "Transaction ID not found" });
+
+                const update = await paymentCollection.updateOne(
+                    { transactionId: tran_id },
+                    { $set: { status: "success" } }
+                );
+
+                if (update.modifiedCount > 0) {
+                    console.log(" Payment updated successfully");
+
+                    // Optionally delete cart
+                    const deletedResult = await addFoodCollection.deleteMany(query);
+
+                    return res.send({ deletedResult });
+
+                } else {
+                    return res.status(500).send({ message: "Failed to update payment" });
+                }
+            } catch (err) {
+                console.error("🔥 Error in success-payment:", err);
+                res.status(500).send({ message: "Server Error" });
+            }
+            return res.redirect("http://localhost:5173/dashboard/paymentHistory");
+        });
+
+        // Import express and MongoDB client before this snippet
+        // Assume 'client' is your connected MongoDB client
+
+        app.get('/payments', verifyToken, async (req, res) => {
+            try {
+                const email = req.query.email;
+                if (!email) {
+                    return res.status(400).json({ error: "Email query parameter is required" });
+                }
+                const payments = await paymentCollection
+                    .find({ email })
+                    .sort({ date: -1 })
+                    .toArray();
+
+                res.json(payments);
+            } catch (err) {
+                console.error("Error fetching payments:", err);
+                res.status(500).json({ error: "Internal server error" });
+            }
+        });
+
+        app.post('/create-payment-intent', async (req, res) => {
+            try {
+                const { price } = req.body;
+                if (!price) {
+                    return res.status(400).json({ error: "Price is required" });
+                }
+                const amount = parseInt(price * 100); // Convert to cents
+                console.log("Creating PaymentIntent with amount:", amount);
+
+                const paymentIntent = await stripe.paymentIntents.create({
+                    amount: amount,
+                    currency: "usd",
+                    payment_method_types: ['card'],
+                });
+
+                console.log("Client Secret Sent:", paymentIntent.client_secret);
+                res.json({ clientSecret: paymentIntent.client_secret });
+
+            } catch (error) {
+                console.error("Payment Intent Error:", error);
+                res.status(500).json({ error: error.message });
+            }
+        });
+
+        app.get("/payments/:email", async (req, res) => {
+            const query = { email: req.params.email }
+            // if (req.params.email !== req.decoded.email) {
+            //   return res.status(403).send({ message: "forbidden access" })
+            // }
+            const result = await paymentCollection.find(query).toArray()
+            res.send(result)
+        })
+        app.post("/payments", async (req, res) => {
+            const payment = req.body;
+            const paymentResult = await paymentCollection.insertOne(payment);
+            
+            const query = {
+                _id: {
+                    $in: payment.items.map(item => new ObjectId(item.foodId))
+                }
+            };
+            
+            const deletedResult = await addFoodCollection.deleteMany(query);
+            res.send({ paymentResult, deletedResult });
+        });
+
+        app.delete("/payments/:id", async (req, res) => {
+            const id = req.params.id;
+            const query = { _id: new ObjectId(id) }
+            const result = await paymentCollection.deleteOne(query)
+            res.send(result)
+        })
 
         // addfood cart api 
         app.get("/addFood", async (req, res) => {
@@ -526,14 +527,14 @@ app.get('/payments', verifyToken, async (req, res) => {
             console.log(result);
             res.send(result)
         })
-        
+
         // DistrictAvailable api
-        app.get("/districtAvailable" , async (req, res) => {
+        app.get("/districtAvailable", async (req, res) => {
             const result = await districtCollection.find().toArray();
             res.send(result);
         })
-     
-        app.post("/districtAvailable" ,verifyToken, verifyAdmin, async (req, res) => {
+
+        app.post("/districtAvailable", verifyToken, verifyAdmin, async (req, res) => {
             const district = req.body;
             const result = await districtCollection.insertOne(district)
             res.send(result)
