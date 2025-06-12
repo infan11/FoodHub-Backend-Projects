@@ -309,6 +309,70 @@ async function run() {
             res.send(result);
         });
 
+app.put("/restaurantUpload/:restaurantName/:foodName", async (req, res) => {
+    try {
+        const { restaurantName, foodName } = req.params;
+        const updatedFoodData = req.body;
+    
+        // Find the restaurant by restaurantName
+        const restaurant = await restaurantUploadCollection.findOne({ restaurantName });
+    
+        if (!restaurant) {
+          return res.status(404).json({
+            success: false,
+            message: "Restaurant not found"
+          });
+        }
+    
+        // Find the index of the food item to update
+        const foodIndex = restaurant.foods.findIndex(food => food.foodName === foodName);
+        
+        if (foodIndex === -1) {
+          return res.status(404).json({
+            success: false,
+            message: "Food item not found in this restaurant"
+          });
+        }
+    
+        // Create the updated food object
+        const updatedFood = {
+          ...restaurant.foods[foodIndex],
+          ...updatedFoodData
+        };
+    
+        // Update the specific food item in the array
+        restaurant.foods[foodIndex] = updatedFood;
+    
+        // Save the updated restaurant document
+        const result = await restaurantUploadCollection.updateOne(
+          { restaurantName },
+          { $set: { foods: restaurant.foods } }
+        );
+    
+        if (result.modifiedCount > 0) {
+          res.json({
+            success: true,
+            message: "Food item updated successfully",
+            updatedFood
+          });
+        } else {
+          res.status(400).json({
+            success: false,
+            message: "No changes were made to the food item"
+          });
+        }
+      } catch (error) {
+        console.error("Error updating food item:", error);
+        res.status(500).json({
+          success: false,
+          message: "Internal server error",
+          error: error.message
+        });
+      }
+    });
+  
+  
+
 
         // Foods Related  api 
         app.get("/foods", verifyToken, verifyAdmin, verifyModerator, verifyOwner, async (req, res) => {
@@ -498,10 +562,42 @@ async function run() {
             res.send(result);
         })
         app.post("/addFood", verifyToken, async (req, res) => {
-            const foodInfo = req.body;
-            const result = await addFoodCollection.insertOne(foodInfo);
-            res.send(result)
-        })
+            try {
+              const foodInfo = req.body;
+              
+             
+              if (!foodInfo.foodName || !foodInfo.restaurantName || !foodInfo.email) {
+                return res.status(400).json({ error: "Missing required fields" });
+              }
+      
+           
+              foodInfo.createdAt = new Date();
+              
+              const result = await addFoodCollection.insertOne(foodInfo);
+              
+              if (result.insertedId) {
+                return res.status(201).json({
+                  success: true,
+                  insertedId: result.insertedId,
+                  message: "Food item added successfully"
+                });
+              } else {
+                return res.status(500).json({ error: "Failed to add food item" });
+              }
+            } catch (error) {
+              console.error("Error adding food:", error);
+              return res.status(500).json({ error: "Internal server error" });
+            }
+          });
+          app.get("/addItem", verifyToken, async (req, res) => {
+            try {
+              const { email } = req.query;
+              const items = await addFoodCollection.find({ email }).toArray();
+              res.status(200).json(items);
+            } catch (error) {
+              res.status(500).json({ error: "Failed to fetch cart items" });
+            }
+          });
         app.patch("/addFood/:id", async (req, res) => {
             const id = req.params.id;
             const { quantity } = req.body; // Extract updated quantity
