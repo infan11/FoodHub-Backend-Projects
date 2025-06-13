@@ -104,7 +104,7 @@ async function run() {
             res.send({ moderator: false });
         });
 
-        app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
+        app.get("/users", verifyToken, async (req, res) => {
             const result = await usersCollection.find().toArray();
             res.send(result)
         })
@@ -219,7 +219,7 @@ async function run() {
             res.send({ owner });
         });
 
-        app.patch("/users/restaurantOwner/:id", verifyToken, verifyAdmin, async (req, res) => {
+        app.patch("/users/restaurantOwner/:id", verifyToken,  async (req, res) => {
             const id = req.params.id;
             console.log("owner id", id);
             const filter = { _id: new ObjectId(id) }
@@ -401,7 +401,7 @@ app.put("/restaurantUpload/:restaurantName/:foodName", async (req, res) => {
                 total_amount: parseFloat(payment.foodPrice),
                 currency: "BDT",
                 tran_id: trxid,
-                success_url: "http://localhost:5173/dashboard/paymentHistory",
+                success_url: "https://foodhub-d3e1e.web.app/dashboard/paymentHistory",
                 fail_url: "http://localhost:5173/dashboard/fail",
                 cancel_url: "http://localhost:5173/dashboard/cancel",
                 ipn_url: "http://localhost:5173/dashboard/ipn-success-payment",
@@ -448,10 +448,10 @@ app.put("/restaurantUpload/:restaurantName/:foodName", async (req, res) => {
                 const validationURL = `https://sandbox.sslcommerz.com/validator/api/validationserverAPI.php?val_id=${val_id}&store_id=foodh67aed7546ec54&store_passwd=foodh67aed7546ec54@ssl&format=json`;
 
                 const { data } = await axios.get(validationURL);
-                //   console.log("🔍 SSLCommerz Validation Response:", data);
+                //   console.log("SSLCommerz Validation Response:", data);
 
                 if (data.status !== "VALID" && data.status !== "VALIDATED") {
-                    // return res.status(400).send({ message: "❌ Invalid Payment" });
+                    // return res.status(400).send({ message: "Invalid Payment" });
                 }
 
                 const payment = await paymentCollection.findOne({ transactionId: tran_id });
@@ -474,10 +474,10 @@ app.put("/restaurantUpload/:restaurantName/:foodName", async (req, res) => {
                     return res.status(500).send({ message: "Failed to update payment" });
                 }
             } catch (err) {
-                console.error("🔥 Error in success-payment:", err);
+                console.error(" Error in success-payment:", err);
                 res.status(500).send({ message: "Server Error" });
             }
-            return res.redirect("http://localhost:5173/dashboard/paymentHistory");
+            return res.redirect("https://foodhub-d3e1e.web.app/dashboard/paymentHistory");
         });
 
         // Import express and MongoDB client before this snippet
