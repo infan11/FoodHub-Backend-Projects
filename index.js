@@ -236,6 +236,7 @@ async function run() {
 
 
         // restatuant 
+
         app.get("/restaurantUpload", async (req, res) => {
             const { email, restaurantName } = req.query;
 
@@ -247,7 +248,7 @@ async function run() {
                     return res.status(500).send({ message: "Error checking restaurant", error });
                 }
             }
-        
+
             try {
                 const result = await restaurantUploadCollection.find().toArray();
                 res.send(result);
@@ -255,9 +256,7 @@ async function run() {
                 res.status(500).send({ message: "Error retrieving restaurants", error });
             }
         });
-        
 
-        // 2️⃣ Upload new restaurant (block duplicates)
         app.post("/restaurantUpload", verifyToken, async (req, res) => {
             const addFood = req.body;
             const { email, restaurantName } = addFood;
@@ -306,20 +305,7 @@ async function run() {
             const result = await restaurantUploadCollection.deleteOne(query);
             res.send(result);
         })
-        app.delete("/restaurantUpload/:restaurantName/:foodName", async (req, res) => {
-            const { restaurantName, foodName } = req.params;
-
-            const filter = { restaurantName: restaurantName };
-            const update = { $pull: { foods: { foodName: foodName } } }; // Remove only the matching food
-
-            const result = await restaurantUploadCollection.updateOne(filter, update);
-
-            if (result.modifiedCount > 0) {
-                res.send({ success: true, message: "Food item deleted successfully" });
-            } else {
-                res.status(404).send({ success: false, message: "Food not found" });
-            }
-        });
+    
         app.patch("/restaurantUpload/:restaurantName", async (req, res) => {
             const restaurantName = req.params.restaurantName;
             const foodInfo = req.body;
@@ -332,77 +318,162 @@ async function run() {
             res.send(result);
         });
 
-        app.put("/restaurantUpload/:restaurantName/:foodName", async (req, res) => {
+
+        // owner dashboard routes
+
+        app.get('/restaurantManage/:email', async (req, res) => {
             try {
-                const { restaurantName, foodName } = req.params;
-                const updatedFoodData = req.body;
-
-                // Find the restaurant by restaurantName
-                const restaurant = await restaurantUploadCollection.findOne({ restaurantName });
-
-                if (!restaurant) {
-                    return res.status(404).json({
-                        success: false,
-                        message: "Restaurant not found"
-                    });
-                }
-
-                app.get('/restaurantUpload', async (req, res) => {
-                    const email = req.query.email;
-                    const exists = await restaurantUploadCollection.findOne({ email });
-                    res.send({ exists: !!exists });
-                });
-
-
-                const foodIndex = restaurant.foods.findIndex(food => food.foodName === foodName);
-
-                if (foodIndex === -1) {
-                    return res.status(404).json({
-                        success: false,
-                        message: "Food item not found in this restaurant"
-                    });
-                }
-
-                // Create the updated food object
-                const updatedFood = {
-                    ...restaurant.foods[foodIndex],
-                    ...updatedFoodData
-                };
-
-                // Update the specific food item in the array
-                restaurant.foods[foodIndex] = updatedFood;
-
-                // Save the updated restaurant document
-                const result = await restaurantUploadCollection.updateOne(
-                    { restaurantName },
-                    { $set: { foods: restaurant.foods } }
-                );
-
-                if (result.modifiedCount > 0) {
-                    res.json({
-                        success: true,
-                        message: "Food item updated successfully",
-                        updatedFood
-                    });
-                } else {
-                    res.status(400).json({
-                        success: false,
-                        message: "No changes were made to the food item"
-                    });
-                }
+              const email = req.params.email;
+              if (!email) return res.status(400).json({ message: 'Email is required' });
+          
+              const restaurant = await restaurantUploadCollection.findOne({ email });
+          
+              if (!restaurant) {
+                return res.status(404).json({ message: 'Restaurant not found' });
+              }
+          
+              res.status(200).json(restaurant);
             } catch (error) {
-                console.error("Error updating food item:", error);
-                res.status(500).json({
-                    success: false,
-                    message: "Internal server error",
-                    error: error.message
+              console.error('Error fetching restaurant:', error);
+              res.status(500).json({ message: 'Internal server error' });
+            }
+          });
+          app.put("/restaurantManage/:restaurantName/:foodName", async (req, res) => {
+            try {
+              const { restaurantName, foodName } = req.params;
+              const updatedFoodData = req.body;
+          
+              // Validate required fields
+              const requiredFields = ['foodName', 'price'];
+              const missingFields = requiredFields.filter(field => !updatedFoodData[field]);
+              
+              if (missingFields.length > 0) {
+                return res.status(400).json({
+                  success: false,
+                  message: `Missing required fields: ${missingFields.join(', ')}`,
+                  type: "VALIDATION_ERROR"
                 });
+              }
+          
+           
+              if (isNaN(updatedFoodData.price) || parseFloat(updatedFoodData.price) <= 0) {
+                return res.status(400).json({
+                  success: false,
+                  message: "Price must be a positive number",
+                  type: "VALIDATION_ERROR"
+                });
+              }
+          
+             
+              const restaurant = await restaurantUploadCollection.findOne({
+                restaurantName,
+                "foods.foodName": foodName
+              });
+          
+              if (!restaurant) {
+                return res.status(404).json({
+                  success: false,
+                  message: "Restaurant or food item not found",
+                  type: "NOT_FOUND"
+                });
+              }
+          
+              const foodItem = restaurant.foods.find(f => f.foodName === foodName);
+              if (!foodItem) {
+                return res.status(404).json({
+                  success: false,
+                  message: "Food item not found in the specified restaurant",
+                  type: "FOOD_NOT_FOUND"
+                });
+              }
+          
+           
+              const updatePayload = {};
+              const changes = {};
+          
+              if (foodItem.foodName !== updatedFoodData.foodName) {
+                updatePayload["foods.$.foodName"] = updatedFoodData.foodName;
+                changes.foodName = true;
+              }
+          
+              if (foodItem.foodImage !== updatedFoodData.foodImage) {
+                updatePayload["foods.$.foodImage"] = updatedFoodData.foodImage;
+                changes.foodImage = true;
+              }
+          
+              if (foodItem.category !== updatedFoodData.category) {
+                updatePayload["foods.$.category"] = updatedFoodData.category;
+                changes.category = true;
+              }
+          
+              if (parseFloat(foodItem.price) !== parseFloat(updatedFoodData.price)) {
+                updatePayload["foods.$.price"] = parseFloat(updatedFoodData.price);
+                changes.price = true;
+              }
+          
+              if (foodItem.description !== updatedFoodData.description) {
+                updatePayload["foods.$.description"] = updatedFoodData.description;
+                changes.description = true;
+              }
+          
+              // Check if any changes were actually made
+              if (Object.keys(updatePayload).length === 0) {
+                return res.json({
+                  success: true,
+                  message: "No changes detected",
+                  modifiedCount: 0,
+                  type: "NO_CHANGES"
+                });
+              }
+        
+              updatePayload["foods.$.updatedAt"] = new Date();
+          
+              const result = await restaurantUploadCollection.updateOne(
+                { restaurantName, "foods.foodName": foodName },
+                { $set: updatePayload }
+              );
+          
+              if (result.modifiedCount === 0) {
+                return res.json({
+                  success: true,
+                  message: "No changes were made to the food item",
+                  modifiedCount: 0,
+                  type: "NO_CHANGES"
+                });
+              }
+          
+              res.json({
+                success: true,
+                message: "Food item updated successfully",
+                modifiedCount: result.modifiedCount,
+                changes,
+                updatedFields: Object.keys(updatePayload)
+              });
+          
+            } catch (error) {
+              console.error("Error updating food item:", error);
+              res.status(500).json({
+                success: false,
+                message: "Internal server error",
+                type: "SERVER_ERROR",
+                error: error.message
+              });
+            }
+          });
+          app.delete("/restaurantManage/:restaurantName/:foodName", async (req, res) => {
+            const { restaurantName, foodName } = req.params;
+        
+            const filter = { restaurantName: restaurantName };
+            const update = { $pull: { foods: { foodName: foodName } } };
+        
+            const result = await restaurantUploadCollection.updateOne(filter, update);
+        
+            if (result.modifiedCount > 0) {
+                res.send({ success: true, message: "Food item deleted successfully" });
+            } else {
+                res.status(404).send({ success: false, message: "Food not found" });
             }
         });
-
-
-
-
         // Foods Related  api 
         app.get("/foods", verifyToken, verifyAdmin, verifyModerator, verifyOwner, async (req, res) => {
             const result = await foodsCollection.find().toArray();
