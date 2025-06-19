@@ -35,6 +35,7 @@ async function run() {
         const addFoodCollection = client.db("FOODHUB").collection("addFood");
         const paymentCollection = client.db("FOODHUB").collection("payment");
         const districtCollection = client.db("FOODHUB").collection("districtAvailable");
+        const reviewCollection = client.db("FOODHUB").collection("reviewAvailable");
         // token create
         app.post("/jwt", async (req, res) => {
             const user = req.body;
@@ -165,6 +166,7 @@ async function run() {
             };
         };
         // user verify admin 
+        // Admin Routes
         app.patch("/users/admin/:id", verifyToken, verifyRole("admin"), async (req, res) => {
             const id = req.params.id;
             console.log(id);
@@ -180,6 +182,121 @@ async function run() {
             res.send(result)
         })
 
+        app.get("/revenue-summary", async (req, res) => {
+            try {
+                const payments = await paymentCollection.find({}).toArray();
+
+                const totalRevenue = payments.reduce((acc, item) => acc + parseFloat(item.foodPrice || 0), 0);
+                const totalOrders = payments.length;
+                const averageOrder = totalOrders > 0 ? totalRevenue / totalOrders : 0;
+
+                res.send({
+                    totalRevenue,
+                    totalOrders,
+                    averageOrder,
+                });
+            } catch (error) {
+                console.error("Error in /revenue-summary:", error);
+                res.status(500).send({ error: "Server error" });
+            }
+        });
+
+
+
+        // ✅ GET: /revenue-by-month
+        app.get("/revenue-by-month", async (req, res) => {
+            const payments = await paymentCollection.find({}).toArray();
+
+            const monthly = {};
+
+            payments.forEach(payment => {
+                const date = new Date(payment.date);
+                const month = date.toLocaleString("default", { month: "short", year: "numeric" }); // eg: "Jun 2025"
+
+                if (!monthly[month]) {
+                    monthly[month] = 0;
+                }
+                monthly[month] += parseFloat(payment.foodPrice);
+            });
+
+            const result = Object.entries(monthly).map(([month, revenue]) => ({
+                month,
+                revenue: parseFloat(revenue.toFixed(2))
+            }));
+
+            res.send(result);
+        });
+
+
+        app.get("/daily-revenue", async (req, res) => {
+            const payments = await paymentCollection.find({}).toArray();
+
+            const daily = {};
+
+            payments.forEach(payment => {
+                const date = new Date(payment.date).toISOString().split("T")[0]; // YYYY-MM-DD
+
+                if (!daily[date]) {
+                    daily[date] = 0;
+                }
+                daily[date] += parseFloat(payment.foodPrice);
+            });
+
+            // Last 7 days only
+            const last7Days = Object.entries(daily)
+                .sort((a, b) => new Date(b[0]) - new Date(a[0]))
+                .slice(0, 7)
+                .reverse()
+                .map(([date, revenue]) => ({
+                    date,
+                    revenue: parseFloat(revenue.toFixed(2))
+                }));
+
+            res.send(last7Days);
+        });
+
+
+        // Updated /top-items endpoint to include commission
+        app.get("/top-items", async (req, res) => {
+            const payments = await paymentCollection.find({}).toArray();
+
+            const itemMap = {};
+
+            payments.forEach(payment => {
+                if (Array.isArray(payment.items)) {
+                    payment.items.forEach(item => {
+                        const key = item.foodName;
+
+                        if (!itemMap[key]) {
+                            itemMap[key] = {
+                                foodName: item.foodName,
+                                quantity: 0,
+                                totalRevenue: 0,
+                                restaurantRevenue: 0,
+                                platformCommission: 0,
+                                restaurantName: item.restaurantName
+                            };
+                        }
+
+                        const itemTotal = parseFloat(item.price);
+                        const commission = itemTotal * 0.05;
+
+                        itemMap[key].quantity += parseInt(item.quantity);
+                        itemMap[key].totalRevenue += itemTotal;
+                        itemMap[key].platformCommission += commission;
+                        itemMap[key].restaurantRevenue += (itemTotal - commission);
+                    });
+                }
+            });
+
+            const result = Object.values(itemMap)
+                .sort((a, b) => b.quantity - a.quantity)
+                .slice(0, 6); // top 6 items
+
+            res.send(result);
+        });
+
+        /// end
         app.patch("/users/moderator/:id", verifyToken, verifyAdmin, async (req, res) => {
             const id = req.params.id;
             console.log(id);
@@ -305,17 +422,26 @@ async function run() {
             const result = await restaurantUploadCollection.deleteOne(query);
             res.send(result);
         })
-    
-        app.patch("/restaurantUpload/:restaurantName", async (req, res) => {
-            const restaurantName = req.params.restaurantName;
-            const foodInfo = req.body;
-            const query = { restaurantName };
+
+        // Add this route to your backend
+        // PATCH a review to a food item inside a restaurant
+        app.patch("/restaurantUpload/:restaurantName/:foodName", async (req, res) => {
+            const { restaurantName, foodName } = req.params;
+            const { reviewData } = req.body;
+
+            const query = {
+                restaurantName: restaurantName,
+                "foods.foodName": foodName,
+            };
+
             const updateDoc = {
-                $push: { foods: foodInfo }, // Push foodInfo into the "foods" array
+                $push: {
+                    "foods.$.reviews": reviewData,
+                },
             };
 
             const result = await restaurantUploadCollection.updateOne(query, updateDoc);
-            res.send(result);
+            res.send({ success: result.modifiedCount > 0 });
         });
 
 
@@ -323,151 +449,78 @@ async function run() {
 
         app.get('/restaurantManage/:email', async (req, res) => {
             try {
-              const email = req.params.email;
-              if (!email) return res.status(400).json({ message: 'Email is required' });
-          
-              const restaurant = await restaurantUploadCollection.findOne({ email });
-          
-              if (!restaurant) {
-                return res.status(404).json({ message: 'Restaurant not found' });
-              }
-          
-              res.status(200).json(restaurant);
+                const email = req.params.email;
+                if (!email) return res.status(400).json({ message: 'Email is required' });
+
+                const restaurant = await restaurantUploadCollection.findOne({ email });
+
+                if (!restaurant) {
+                    return res.status(404).json({ message: 'Restaurant not found' });
+                }
+
+                res.status(200).json(restaurant);
             } catch (error) {
-              console.error('Error fetching restaurant:', error);
-              res.status(500).json({ message: 'Internal server error' });
+                console.error('Error fetching restaurant:', error);
+                res.status(500).json({ message: 'Internal server error' });
             }
-          });
-          app.put("/restaurantManage/:restaurantName/:foodName", async (req, res) => {
+        });
+        app.put("/restaurantManage/:restaurantName/:foodName", async (req, res) => {
             try {
-              const { restaurantName, foodName } = req.params;
-              const updatedFoodData = req.body;
-          
-              // Validate required fields
-              const requiredFields = ['foodName', 'price'];
-              const missingFields = requiredFields.filter(field => !updatedFoodData[field]);
-              
-              if (missingFields.length > 0) {
-                return res.status(400).json({
-                  success: false,
-                  message: `Missing required fields: ${missingFields.join(', ')}`,
-                  type: "VALIDATION_ERROR"
+                const { restaurantName, foodName } = req.params;
+                const { reviewData } = req.body;
+
+                // Validate review data
+                if (!reviewData || !reviewData.rating) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "Invalid review data"
+                    });
+                }
+
+                // Update restaurant's food item with new review
+                const result = await restaurantUploadCollection.updateOne(
+                    {
+                        restaurantName,
+                        "foods.foodName": foodName
+                    },
+                    {
+                        $push: {
+                            "foods.$.reviews": reviewData
+                        },
+                        $set: {
+                            "foods.$.updatedAt": new Date()
+                        }
+                    }
+                );
+
+                if (result.modifiedCount === 0) {
+                    return res.status(404).json({
+                        success: false,
+                        message: "Food item not found"
+                    });
+                }
+
+                res.json({
+                    success: true,
+                    message: "Review added successfully"
                 });
-              }
-          
-           
-              if (isNaN(updatedFoodData.price) || parseFloat(updatedFoodData.price) <= 0) {
-                return res.status(400).json({
-                  success: false,
-                  message: "Price must be a positive number",
-                  type: "VALIDATION_ERROR"
-                });
-              }
-          
-             
-              const restaurant = await restaurantUploadCollection.findOne({
-                restaurantName,
-                "foods.foodName": foodName
-              });
-          
-              if (!restaurant) {
-                return res.status(404).json({
-                  success: false,
-                  message: "Restaurant or food item not found",
-                  type: "NOT_FOUND"
-                });
-              }
-          
-              const foodItem = restaurant.foods.find(f => f.foodName === foodName);
-              if (!foodItem) {
-                return res.status(404).json({
-                  success: false,
-                  message: "Food item not found in the specified restaurant",
-                  type: "FOOD_NOT_FOUND"
-                });
-              }
-          
-           
-              const updatePayload = {};
-              const changes = {};
-          
-              if (foodItem.foodName !== updatedFoodData.foodName) {
-                updatePayload["foods.$.foodName"] = updatedFoodData.foodName;
-                changes.foodName = true;
-              }
-          
-              if (foodItem.foodImage !== updatedFoodData.foodImage) {
-                updatePayload["foods.$.foodImage"] = updatedFoodData.foodImage;
-                changes.foodImage = true;
-              }
-          
-              if (foodItem.category !== updatedFoodData.category) {
-                updatePayload["foods.$.category"] = updatedFoodData.category;
-                changes.category = true;
-              }
-          
-              if (parseFloat(foodItem.price) !== parseFloat(updatedFoodData.price)) {
-                updatePayload["foods.$.price"] = parseFloat(updatedFoodData.price);
-                changes.price = true;
-              }
-          
-              if (foodItem.description !== updatedFoodData.description) {
-                updatePayload["foods.$.description"] = updatedFoodData.description;
-                changes.description = true;
-              }
-          
-              // Check if any changes were actually made
-              if (Object.keys(updatePayload).length === 0) {
-                return res.json({
-                  success: true,
-                  message: "No changes detected",
-                  modifiedCount: 0,
-                  type: "NO_CHANGES"
-                });
-              }
-        
-              updatePayload["foods.$.updatedAt"] = new Date();
-          
-              const result = await restaurantUploadCollection.updateOne(
-                { restaurantName, "foods.foodName": foodName },
-                { $set: updatePayload }
-              );
-          
-              if (result.modifiedCount === 0) {
-                return res.json({
-                  success: true,
-                  message: "No changes were made to the food item",
-                  modifiedCount: 0,
-                  type: "NO_CHANGES"
-                });
-              }
-          
-              res.json({
-                success: true,
-                message: "Food item updated successfully",
-                modifiedCount: result.modifiedCount,
-                changes,
-                updatedFields: Object.keys(updatePayload)
-              });
-          
+
             } catch (error) {
-              console.error("Error updating food item:", error);
-              res.status(500).json({
-                success: false,
-                message: "Internal server error",
-                type: "SERVER_ERROR",
-                error: error.message
-              });
+                console.error("Error adding review:", error);
+                res.status(500).json({
+                    success: false,
+                    message: "Internal server error"
+                });
             }
-          });
-          app.delete("/restaurantManage/:restaurantName/:foodName", async (req, res) => {
+        });
+        app.delete("/restaurantManage/:restaurantName/:foodName", async (req, res) => {
             const { restaurantName, foodName } = req.params;
-        
+
             const filter = { restaurantName: restaurantName };
             const update = { $pull: { foods: { foodName: foodName } } };
-        
+
             const result = await restaurantUploadCollection.updateOne(filter, update);
-        
+
             if (result.modifiedCount > 0) {
                 res.send({ success: true, message: "Food item deleted successfully" });
             } else {
@@ -475,163 +528,204 @@ async function run() {
             }
         });
         // Get restaurant payments with commission calculation
-app.get('/restaurantPayments/:email', verifyToken, verifyOwner, async (req, res) => {
-    try {
-        const email = req.params.email;
-        
-        // First find the restaurant owned by this email
-        const restaurant = await restaurantUploadCollection.findOne({ email });
-        
-        if (!restaurant) {
-            return res.status(404).json({ 
-                success: false,
-                message: 'Restaurant not found for this owner' 
-            });
-        }
+        app.get('/restaurantPayments/:email', verifyToken, verifyOwner, async (req, res) => {
+            try {
+                const email = req.params.email;
 
-        // Find all payments where items contain this restaurant's name
-        const payments = await paymentCollection.find({ 
-            'items.restaurantName': restaurant.restaurantName,
-            status: 'success' // Only successful payments
-        }).sort({ date: -1 }).toArray();
+                // First find the restaurant owned by this email
+                const restaurant = await restaurantUploadCollection.findOne({ email });
 
-        // Calculate totals
-        const totals = payments.reduce((acc, payment) => {
-            const restaurantItems = payment.items.filter(
-                item => item.restaurantName === restaurant.restaurantName
-            );
-            
-            const paymentTotal = restaurantItems.reduce(
-                (sum, item) => sum + (parseFloat(item.price) * parseInt(item.quantity || 1)),
-                0
-            );
-            
-            const commission = paymentTotal * 0.05; // 5% commission
-            const earnings = paymentTotal - commission;
-            
-            return {
-                totalSales: acc.totalSales + paymentTotal,
-                totalCommission: acc.totalCommission + commission,
-                totalEarnings: acc.totalEarnings + earnings
-            };
-        }, { totalSales: 0, totalCommission: 0, totalEarnings: 0 });
+                if (!restaurant) {
+                    return res.status(404).json({
+                        success: false,
+                        message: 'Restaurant not found for this owner'
+                    });
+                }
 
-        res.status(200).json({
-            success: true,
-            data: payments,
-            totals
+                // Find all payments where items contain this restaurant's name
+                const payments = await paymentCollection.find({
+                    'items.restaurantName': restaurant.restaurantName,
+                    status: 'success' // Only successful payments
+                }).sort({ date: -1 }).toArray();
+
+                // Calculate totals
+                const totals = payments.reduce((acc, payment) => {
+                    const restaurantItems = payment.items.filter(
+                        item => item.restaurantName === restaurant.restaurantName
+                    );
+
+                    const paymentTotal = restaurantItems.reduce(
+                        (sum, item) => sum + (parseFloat(item.price) * parseInt(item.quantity || 1)),
+                        0
+                    );
+
+                    const commission = paymentTotal * 0.05; // 5% commission
+                    const earnings = paymentTotal - commission;
+
+                    return {
+                        totalSales: acc.totalSales + paymentTotal,
+                        totalCommission: acc.totalCommission + commission,
+                        totalEarnings: acc.totalEarnings + earnings
+                    };
+                }, { totalSales: 0, totalCommission: 0, totalEarnings: 0 });
+
+                res.status(200).json({
+                    success: true,
+                    data: payments,
+                    totals
+                });
+
+            } catch (error) {
+                console.error('Error fetching restaurant payments:', error);
+                res.status(500).json({
+                    success: false,
+                    message: 'Server error while fetching payments'
+                });
+            }
         });
 
-    } catch (error) {
-        console.error('Error fetching restaurant payments:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error while fetching payments'
+        // Get restaurant revenue summary
+        app.get('/restaurantRevenue/:email', verifyToken, verifyOwner, async (req, res) => {
+            try {
+                const email = req.params.email;
+
+                // First find the restaurant owned by this email
+                const restaurant = await restaurantUploadCollection.findOne({ email });
+
+                if (!restaurant) {
+                    return res.status(404).json({
+                        success: false,
+                        message: 'Restaurant not found for this owner'
+                    });
+                }
+
+                // Find all successful payments for this restaurant
+                const payments = await paymentCollection.find({
+                    'items.restaurantName': restaurant.restaurantName,
+                    status: 'success'
+                }).toArray();
+
+                if (!payments || payments.length === 0) {
+                    return res.status(200).json({
+                        success: true,
+                        todayEarnings: 0,
+                        monthlyEarnings: 0,
+                        totalBalance: 0,
+                        lastPayoutDate: null
+                    });
+                }
+
+                // Calculate today's earnings
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+
+                const todayEarnings = payments
+                    .filter(p => new Date(p.date) >= today)
+                    .reduce((sum, payment) => {
+                        const restaurantItems = payment.items.filter(
+                            item => item.restaurantName === restaurant.restaurantName
+                        );
+                        const paymentTotal = restaurantItems.reduce(
+                            (sum, item) => sum + (parseFloat(item.price || 0) * parseInt(item.quantity?.$numberInt || item.quantity || 1)),
+                            0
+                        );
+                        return sum + (paymentTotal * 0.95); // After 5% commission
+                    }, 0);
+
+                // Calculate monthly earnings
+                const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+
+                const monthlyEarnings = payments
+                    .filter(p => new Date(p.date) >= firstDayOfMonth)
+                    .reduce((sum, payment) => {
+                        const restaurantItems = payment.items.filter(
+                            item => item.restaurantName === restaurant.restaurantName
+                        );
+                        const paymentTotal = restaurantItems.reduce(
+                            (sum, item) => sum + (parseFloat(item.price || 0) * parseInt(item.quantity?.$numberInt || item.quantity || 1)),
+                            0
+                        );
+                        return sum + (paymentTotal * 0.95); // After 5% commission
+                    }, 0);
+
+                // Calculate total balance (all time earnings)
+                const totalBalance = payments.reduce((sum, payment) => {
+                    const restaurantItems = payment.items.filter(
+                        item => item.restaurantName === restaurant.restaurantName
+                    );
+                    const paymentTotal = restaurantItems.reduce(
+                        (sum, item) => sum + (parseFloat(item.price || 0) * parseInt(item.quantity?.$numberInt || item.quantity || 1)),
+                        0
+                    );
+                    return sum + (paymentTotal * 0.95); // After 5% commission
+                }, 0);
+
+                // Find last payout date if available
+                const lastPayout = await paymentCollection.findOne({
+                    'items.restaurantName': restaurant.restaurantName,
+                    status: 'payout'
+                }, { sort: { date: -1 } });
+
+                res.status(200).json({
+                    success: true,
+                    todayEarnings,
+                    monthlyEarnings,
+                    totalBalance,
+                    lastPayoutDate: lastPayout?.date
+                });
+
+            } catch (error) {
+                console.error('Error fetching restaurant revenue:', error);
+                res.status(500).json({
+                    success: false,
+                    message: 'Server error while fetching revenue data'
+                });
+            }
         });
-    }
-});
+        app.get('/orders', async (req, res) => {
+            try {
+                const restaurantName = req.query.restaurantName;
 
-// Get restaurant revenue summary
-app.get('/restaurantRevenue/:email', verifyToken,verifyOwner, async (req, res) => {
-    try {
-        const email = req.params.email;
-        
-        // First find the restaurant owned by this email
-        const restaurant = await restaurantUploadCollection.findOne({ email });
-        
-        if (!restaurant) {
-            return res.status(404).json({ 
-                success: false,
-                message: 'Restaurant not found for this owner' 
-            });
-        }
+                if (!restaurantName) {
+                    return res.status(400).json({ message: 'Restaurant name is required' });
+                }
 
-        // Find all successful payments for this restaurant
-        const payments = await paymentCollection.find({ 
-            'items.restaurantName': restaurant.restaurantName,
-            status: 'success'
-        }).toArray();
+                const orders = await paymentCollection.find({
+                    'items.restaurantName': restaurantName
+                }).toArray();
 
-        if (!payments || payments.length === 0) {
-            return res.status(200).json({
-                success: true,
-                todayEarnings: 0,
-                monthlyEarnings: 0,
-                totalBalance: 0,
-                lastPayoutDate: null
-            });
-        }
-
-        // Calculate today's earnings
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        
-        const todayEarnings = payments
-            .filter(p => new Date(p.date) >= today)
-            .reduce((sum, payment) => {
-                const restaurantItems = payment.items.filter(
-                    item => item.restaurantName === restaurant.restaurantName
-                );
-                const paymentTotal = restaurantItems.reduce(
-                    (sum, item) => sum + (parseFloat(item.price || 0) * parseInt(item.quantity?.$numberInt || item.quantity || 1)),
-                    0
-                );
-                return sum + (paymentTotal * 0.95); // After 5% commission
-            }, 0);
-
-        // Calculate monthly earnings
-        const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-        
-        const monthlyEarnings = payments
-            .filter(p => new Date(p.date) >= firstDayOfMonth)
-            .reduce((sum, payment) => {
-                const restaurantItems = payment.items.filter(
-                    item => item.restaurantName === restaurant.restaurantName
-                );
-                const paymentTotal = restaurantItems.reduce(
-                    (sum, item) => sum + (parseFloat(item.price || 0) * parseInt(item.quantity?.$numberInt || item.quantity || 1)),
-                    0
-                );
-                return sum + (paymentTotal * 0.95); // After 5% commission
-            }, 0);
-
-        // Calculate total balance (all time earnings)
-        const totalBalance = payments.reduce((sum, payment) => {
-            const restaurantItems = payment.items.filter(
-                item => item.restaurantName === restaurant.restaurantName
-            );
-            const paymentTotal = restaurantItems.reduce(
-                (sum, item) => sum + (parseFloat(item.price || 0) * parseInt(item.quantity?.$numberInt || item.quantity || 1)),
-                0
-            );
-            return sum + (paymentTotal * 0.95); // After 5% commission
-        }, 0);
-
-        // Find last payout date if available
-        const lastPayout = await paymentCollection.findOne({
-            'items.restaurantName': restaurant.restaurantName,
-            status: 'payout'
-        }, { sort: { date: -1 } });
-
-        res.status(200).json({
-            success: true,
-            todayEarnings,
-            monthlyEarnings,
-            totalBalance,
-            lastPayoutDate: lastPayout?.date
+                res.status(200).json(orders);
+            } catch (error) {
+                console.error('Error fetching orders:', error);
+                res.status(500).json({ message: 'Internal Server Error' });
+            }
         });
 
-    } catch (error) {
-        console.error('Error fetching restaurant revenue:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error while fetching revenue data'
-        });
-    }
-});
+        // Fetch reviews for a restaurant
+        // Express Route Example
+        // app.post('/reviews', async (req, res) => {
+        //     try {
+        //         const review = new reviewCollection(req.body);
+        //         const result = await review.save();
+        //         res.send({ insertedId: result._id });
+        //     } catch (error) {
+        //         res.status(500).send({ error: 'Failed to save review' });
+        //     }
+        // });
+        // app.get('/reviews/restaurant/:id', async (req, res) => {
+        //     try {
+        //         const reviews = await reviewCollection.find({ restaurantId: req.params.id })
+        //             .sort({ date: -1 })
+        //             .limit(50);
+        //         res.send(reviews);
+        //     } catch (error) {
+        //         res.status(500).send({ error: 'Failed to fetch reviews' });
+        //     }
+        // });
 
-// end owner dashboard
-        
+
+        // end owner dashboard
+
         // // Foods Related  api 
         // app.get("/foods", verifyToken, verifyAdmin, verifyModerator, verifyOwner, async (req, res) => {
         //     const result = await foodsCollection.find().toArray();
@@ -816,111 +910,8 @@ app.get('/restaurantRevenue/:email', verifyToken,verifyOwner, async (req, res) =
             const result = await paymentCollection.find(query).toArray()
             res.send(result)
         });
-        // ✅ GET: /revenue-summary
-        app.get("/revenue-summary", async (req, res) => {
-            try {
-                const payments = await paymentCollection.find({}).toArray();
 
-                const totalRevenue = payments.reduce((acc, item) => acc + parseFloat(item.foodPrice || 0), 0);
-                const totalOrders = payments.length;
-                const averageOrder = totalOrders > 0 ? totalRevenue / totalOrders : 0;
-
-                res.send({
-                    totalRevenue,
-                    totalOrders,
-                    averageOrder,
-                });
-            } catch (error) {
-                console.error("Error in /revenue-summary:", error);
-                res.status(500).send({ error: "Server error" });
-            }
-        });
-
-
-
-        // ✅ GET: /revenue-by-month
-        app.get("/revenue-by-month", async (req, res) => {
-            const payments = await paymentCollection.find({}).toArray();
-
-            const monthly = {};
-
-            payments.forEach(payment => {
-                const date = new Date(payment.date);
-                const month = date.toLocaleString("default", { month: "short", year: "numeric" }); // eg: "Jun 2025"
-
-                if (!monthly[month]) {
-                    monthly[month] = 0;
-                }
-                monthly[month] += parseFloat(payment.foodPrice);
-            });
-
-            const result = Object.entries(monthly).map(([month, revenue]) => ({
-                month,
-                revenue: parseFloat(revenue.toFixed(2))
-            }));
-
-            res.send(result);
-        });
-
-
-        app.get("/daily-revenue", async (req, res) => {
-            const payments = await paymentCollection.find({}).toArray();
-
-            const daily = {};
-
-            payments.forEach(payment => {
-                const date = new Date(payment.date).toISOString().split("T")[0]; // YYYY-MM-DD
-
-                if (!daily[date]) {
-                    daily[date] = 0;
-                }
-                daily[date] += parseFloat(payment.foodPrice);
-            });
-
-            // Last 7 days only
-            const last7Days = Object.entries(daily)
-                .sort((a, b) => new Date(b[0]) - new Date(a[0]))
-                .slice(0, 7)
-                .reverse()
-                .map(([date, revenue]) => ({
-                    date,
-                    revenue: parseFloat(revenue.toFixed(2))
-                }));
-
-            res.send(last7Days);
-        });
-
-        app.get("/top-items", async (req, res) => {
-            const payments = await paymentCollection.find({}).toArray();
-
-            const itemMap = {};
-
-            payments.forEach(payment => {
-                if (Array.isArray(payment.items)) {
-                    payment.items.forEach(item => {
-                        const key = item.foodName;
-
-                        if (!itemMap[key]) {
-                            itemMap[key] = {
-                                foodName: item.foodName,
-                                quantity: 0,
-                                totalRevenue: 0,
-                                restaurantName: item.restaurantName
-                            };
-                        }
-
-                        itemMap[key].quantity += parseInt(item.quantity);
-                        itemMap[key].totalRevenue += parseFloat(item.price);
-                    });
-                }
-            });
-
-            const result = Object.values(itemMap)
-                .sort((a, b) => b.quantity - a.quantity)
-                .slice(0, 6); // top 6 items
-
-            res.send(result);
-        });
+        // admin revenue
 
         // addfood cart api 
         app.get("/addFood", async (req, res) => {
