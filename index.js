@@ -474,18 +474,176 @@ async function run() {
                 res.status(404).send({ success: false, message: "Food not found" });
             }
         });
-        // Foods Related  api 
-        app.get("/foods", verifyToken, verifyAdmin, verifyModerator, verifyOwner, async (req, res) => {
-            const result = await foodsCollection.find().toArray();
-            res.send(result)
-        })
+        // Get restaurant payments with commission calculation
+app.get('/restaurantPayments/:email', verifyToken, verifyOwner, async (req, res) => {
+    try {
+        const email = req.params.email;
+        
+        // First find the restaurant owned by this email
+        const restaurant = await restaurantUploadCollection.findOne({ email });
+        
+        if (!restaurant) {
+            return res.status(404).json({ 
+                success: false,
+                message: 'Restaurant not found for this owner' 
+            });
+        }
 
-        app.delete("/foods/:id", async (req, res) => {
-            const id = req.params.id;
-            const query = { _id: new ObjectId(id) };
-            const result = await foodsCollection.deleteOne(query);
-            res.send(result)
-        })
+        // Find all payments where items contain this restaurant's name
+        const payments = await paymentCollection.find({ 
+            'items.restaurantName': restaurant.restaurantName,
+            status: 'success' // Only successful payments
+        }).sort({ date: -1 }).toArray();
+
+        // Calculate totals
+        const totals = payments.reduce((acc, payment) => {
+            const restaurantItems = payment.items.filter(
+                item => item.restaurantName === restaurant.restaurantName
+            );
+            
+            const paymentTotal = restaurantItems.reduce(
+                (sum, item) => sum + (parseFloat(item.price) * parseInt(item.quantity || 1)),
+                0
+            );
+            
+            const commission = paymentTotal * 0.05; // 5% commission
+            const earnings = paymentTotal - commission;
+            
+            return {
+                totalSales: acc.totalSales + paymentTotal,
+                totalCommission: acc.totalCommission + commission,
+                totalEarnings: acc.totalEarnings + earnings
+            };
+        }, { totalSales: 0, totalCommission: 0, totalEarnings: 0 });
+
+        res.status(200).json({
+            success: true,
+            data: payments,
+            totals
+        });
+
+    } catch (error) {
+        console.error('Error fetching restaurant payments:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Server error while fetching payments'
+        });
+    }
+});
+
+// Get restaurant revenue summary
+app.get('/restaurantRevenue/:email', verifyToken,verifyOwner, async (req, res) => {
+    try {
+        const email = req.params.email;
+        
+        // First find the restaurant owned by this email
+        const restaurant = await restaurantUploadCollection.findOne({ email });
+        
+        if (!restaurant) {
+            return res.status(404).json({ 
+                success: false,
+                message: 'Restaurant not found for this owner' 
+            });
+        }
+
+        // Find all successful payments for this restaurant
+        const payments = await paymentCollection.find({ 
+            'items.restaurantName': restaurant.restaurantName,
+            status: 'success'
+        }).toArray();
+
+        if (!payments || payments.length === 0) {
+            return res.status(200).json({
+                success: true,
+                todayEarnings: 0,
+                monthlyEarnings: 0,
+                totalBalance: 0,
+                lastPayoutDate: null
+            });
+        }
+
+        // Calculate today's earnings
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        const todayEarnings = payments
+            .filter(p => new Date(p.date) >= today)
+            .reduce((sum, payment) => {
+                const restaurantItems = payment.items.filter(
+                    item => item.restaurantName === restaurant.restaurantName
+                );
+                const paymentTotal = restaurantItems.reduce(
+                    (sum, item) => sum + (parseFloat(item.price || 0) * parseInt(item.quantity?.$numberInt || item.quantity || 1)),
+                    0
+                );
+                return sum + (paymentTotal * 0.95); // After 5% commission
+            }, 0);
+
+        // Calculate monthly earnings
+        const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+        
+        const monthlyEarnings = payments
+            .filter(p => new Date(p.date) >= firstDayOfMonth)
+            .reduce((sum, payment) => {
+                const restaurantItems = payment.items.filter(
+                    item => item.restaurantName === restaurant.restaurantName
+                );
+                const paymentTotal = restaurantItems.reduce(
+                    (sum, item) => sum + (parseFloat(item.price || 0) * parseInt(item.quantity?.$numberInt || item.quantity || 1)),
+                    0
+                );
+                return sum + (paymentTotal * 0.95); // After 5% commission
+            }, 0);
+
+        // Calculate total balance (all time earnings)
+        const totalBalance = payments.reduce((sum, payment) => {
+            const restaurantItems = payment.items.filter(
+                item => item.restaurantName === restaurant.restaurantName
+            );
+            const paymentTotal = restaurantItems.reduce(
+                (sum, item) => sum + (parseFloat(item.price || 0) * parseInt(item.quantity?.$numberInt || item.quantity || 1)),
+                0
+            );
+            return sum + (paymentTotal * 0.95); // After 5% commission
+        }, 0);
+
+        // Find last payout date if available
+        const lastPayout = await paymentCollection.findOne({
+            'items.restaurantName': restaurant.restaurantName,
+            status: 'payout'
+        }, { sort: { date: -1 } });
+
+        res.status(200).json({
+            success: true,
+            todayEarnings,
+            monthlyEarnings,
+            totalBalance,
+            lastPayoutDate: lastPayout?.date
+        });
+
+    } catch (error) {
+        console.error('Error fetching restaurant revenue:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Server error while fetching revenue data'
+        });
+    }
+});
+
+// end owner dashboard
+        
+        // // Foods Related  api 
+        // app.get("/foods", verifyToken, verifyAdmin, verifyModerator, verifyOwner, async (req, res) => {
+        //     const result = await foodsCollection.find().toArray();
+        //     res.send(result)
+        // })
+
+        // app.delete("/foods/:id", async (req, res) => {
+        //     const id = req.params.id;
+        //     const query = { _id: new ObjectId(id) };
+        //     const result = await foodsCollection.deleteOne(query);
+        //     res.send(result)
+        // })
 
         // SSL Commerce Payment Intent
         app.post("/create-ssl-payment", verifyToken, async (req, res) => {
