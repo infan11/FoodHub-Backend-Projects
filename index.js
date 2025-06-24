@@ -36,6 +36,7 @@ async function run() {
         const paymentCollection = client.db("FOODHUB").collection("payment");
         const districtCollection = client.db("FOODHUB").collection("districtAvailable");
         const reviewCollection = client.db("FOODHUB").collection("reviewAvailable");
+
         // token create
         app.post("/jwt", async (req, res) => {
             const user = req.body;
@@ -56,7 +57,7 @@ async function run() {
                 next();
             })
         }
-        // verify admin 
+        // verify admin  ,  verifyModerator , verifyOwner
         const verifyAdmin = async (req, res, next) => {
             const email = req.decoded.email;
             const query = { email: email };
@@ -77,34 +78,28 @@ async function run() {
             }
             next();
         }
-
-        app.get("/users/admin/:email", verifyToken, verifyAdmin, async (req, res) => {
-            const email = req.params.email;
-            if (email !== req.decoded.email) {
+        const verifyOwner = async (req, res, next) => {
+            const email = req.decoded.email;
+            const query = { email };
+            const user = await usersCollection.findOne(query);
+            const isOwner = user?.role === "owner";
+            if (!isOwner) {
                 return res.status(403).send({ message: "forbidden access" });
             }
-            const query = { email: email };
-            const user = await usersCollection.findOne(query);
-            let admin = false
-            if (user) {
-                admin = user?.role === "admin"
-            }
-            res.send({ admin })
-        });
+            next();
+        };
 
-        app.get("/users/moderator/:email", verifyToken, verifyModerator, async (req, res) => {
-            const email = req.params.email;
-            if (email !== req.decoded.email) {
-                return res.status(403).send({ message: "forbidden access" });
-            }
-            const query = { email: email };
-            const user = await usersCollection.findOne(query);
-            if (user?.role === "moderator") {
-                return res.send({ moderator: true });
-            }
-            res.send({ moderator: false });
-        });
-
+        const verifyRole = (role) => {
+            return async (req, res, next) => {
+                const email = req.decoded.email;
+                const user = await usersCollection.findOne({ email });
+                if (!user || user.role !== role) {
+                    return res.status(403).send({ message: "forbidden access" });
+                }
+                next();
+            };
+        };
+        // users routes
         app.get("/users", verifyToken, async (req, res) => {
             const result = await usersCollection.find().toArray();
             res.send(result)
@@ -124,12 +119,7 @@ async function run() {
                 res.status(500).json({ error: "Internal server error." });
             }
         });
-        // app.post("/users" , async (req, res) => {
-        //     const userInfo = req.body;
-        //     const result = await usersCollection.insertOne(userInfo);
-        //     console.log(result);
-        //     res.send(result)
-        // })
+
         app.put("/users", async (req, res) => {
             const user = req.body;
             const query = { email: user?.email };
@@ -155,18 +145,22 @@ async function run() {
             console.log(result);
             res.send(result)
         })
-        const verifyRole = (role) => {
-            return async (req, res, next) => {
-                const email = req.decoded.email;
-                const user = await usersCollection.findOne({ email });
-                if (!user || user.role !== role) {
-                    return res.status(403).send({ message: "forbidden access" });
-                }
-                next();
-            };
-        };
-        // user verify admin 
-        // Admin Routes
+
+        // admin routes
+
+        app.get("/users/admin/:email", verifyToken, verifyAdmin, async (req, res) => {
+            const email = req.params.email;
+            if (email !== req.decoded.email) {
+                return res.status(403).send({ message: "forbidden access" });
+            }
+            const query = { email: email };
+            const user = await usersCollection.findOne(query);
+            let admin = false
+            if (user) {
+                admin = user?.role === "admin"
+            }
+            res.send({ admin })
+        });
         app.patch("/users/admin/:id", verifyToken, verifyRole("admin"), async (req, res) => {
             const id = req.params.id;
             console.log(id);
@@ -180,20 +174,36 @@ async function run() {
             const result = await usersCollection.updateOne(filter, updateDoc)
             console.log(result);
             res.send(result)
+
         })
+
 
         app.get("/revenue-summary", async (req, res) => {
             try {
                 const payments = await paymentCollection.find({}).toArray();
 
-                const totalRevenue = payments.reduce((acc, item) => acc + parseFloat(item.foodPrice || 0), 0);
-                const totalOrders = payments.length;
-                const averageOrder = totalOrders > 0 ? totalRevenue / totalOrders : 0;
+                let totalRevenue = 0;
+                let totalCommission = 0;
+                let restaurantRevenue = 0;
+
+                payments.forEach(payment => {
+
+                    const amount = typeof payment.foodPrice === 'string'
+                        ? parseFloat(payment.foodPrice.replace(/[^0-9.-]/g, ''))
+                        : Number(payment.foodPrice) || 0;
+
+                    totalRevenue += amount;
+                    const commission = amount * 0.05;
+                    totalCommission += commission;
+                    restaurantRevenue += (amount - commission);
+                });
 
                 res.send({
-                    totalRevenue,
-                    totalOrders,
-                    averageOrder,
+                    totalRevenue: parseFloat(totalRevenue.toFixed(2)),
+                    totalOrders: payments.length,
+                    totalCommission: parseFloat(totalCommission.toFixed(2)),
+                    restaurantRevenue: parseFloat(restaurantRevenue.toFixed(2)),
+                    averageOrder: payments.length > 0 ? parseFloat((totalRevenue / payments.length).toFixed(2)) : 0
                 });
             } catch (error) {
                 console.error("Error in /revenue-summary:", error);
@@ -201,102 +211,145 @@ async function run() {
             }
         });
 
-
-
-        // ✅ GET: /revenue-by-month
         app.get("/revenue-by-month", async (req, res) => {
-            const payments = await paymentCollection.find({}).toArray();
+            try {
+                const payments = await paymentCollection.find({}).toArray();
+                const monthly = {};
 
-            const monthly = {};
+                payments.forEach(payment => {
+                    const date = new Date(payment.date);
+                    const month = date.toLocaleString("default", { month: "short", year: "numeric" });
 
-            payments.forEach(payment => {
-                const date = new Date(payment.date);
-                const month = date.toLocaleString("default", { month: "short", year: "numeric" }); // eg: "Jun 2025"
+                    if (!monthly[month]) {
+                        monthly[month] = {
+                            revenue: 0,
+                            commission: 0,
+                            restaurantRevenue: 0
+                        };
+                    }
 
-                if (!monthly[month]) {
-                    monthly[month] = 0;
-                }
-                monthly[month] += parseFloat(payment.foodPrice);
-            });
+                    const amount = parseFloat(payment.foodPrice);
+                    const commission = amount * 0.05;
 
-            const result = Object.entries(monthly).map(([month, revenue]) => ({
-                month,
-                revenue: parseFloat(revenue.toFixed(2))
-            }));
+                    monthly[month].revenue += amount;
+                    monthly[month].commission += commission;
+                    monthly[month].restaurantRevenue += (amount - commission);
+                });
 
-            res.send(result);
-        });
-
-
-        app.get("/daily-revenue", async (req, res) => {
-            const payments = await paymentCollection.find({}).toArray();
-
-            const daily = {};
-
-            payments.forEach(payment => {
-                const date = new Date(payment.date).toISOString().split("T")[0]; // YYYY-MM-DD
-
-                if (!daily[date]) {
-                    daily[date] = 0;
-                }
-                daily[date] += parseFloat(payment.foodPrice);
-            });
-
-            // Last 7 days only
-            const last7Days = Object.entries(daily)
-                .sort((a, b) => new Date(b[0]) - new Date(a[0]))
-                .slice(0, 7)
-                .reverse()
-                .map(([date, revenue]) => ({
-                    date,
-                    revenue: parseFloat(revenue.toFixed(2))
+                const result = Object.entries(monthly).map(([month, data]) => ({
+                    month,
+                    revenue: parseFloat(data.revenue.toFixed(2)),
+                    commission: parseFloat(data.commission.toFixed(2)),
+                    restaurantRevenue: parseFloat(data.restaurantRevenue.toFixed(2))
                 }));
 
-            res.send(last7Days);
+                res.send(result);
+            } catch (error) {
+                console.error("Error in /revenue-by-month:", error);
+                res.status(500).send({ error: "Server error" });
+            }
         });
 
+        app.get("/daily-revenue", async (req, res) => {
+            try {
+                const payments = await paymentCollection.find({}).toArray();
+                const daily = {};
 
-        // Updated /top-items endpoint to include commission
+                payments.forEach(payment => {
+                    const date = new Date(payment.date).toISOString().split("T")[0];
+                    const amount = parseFloat(payment.foodPrice);
+                    const commission = amount * 0.05;
+
+                    if (!daily[date]) {
+                        daily[date] = {
+                            revenue: 0,
+                            commission: 0,
+                            restaurantRevenue: 0
+                        };
+                    }
+
+                    daily[date].revenue += amount;
+                    daily[date].commission += commission;
+                    daily[date].restaurantRevenue += (amount - commission);
+                });
+
+                const last7Days = Object.entries(daily)
+                    .sort((a, b) => new Date(b[0]) - new Date(a[0]))
+                    .slice(0, 7)
+                    .reverse()
+                    .map(([date, data]) => ({
+                        date,
+                        revenue: parseFloat(data.revenue.toFixed(2)),
+                        commission: parseFloat(data.commission.toFixed(2)),
+                        restaurantRevenue: parseFloat(data.restaurantRevenue.toFixed(2))
+                    }));
+
+                res.send(last7Days);
+            } catch (error) {
+                console.error("Error in /daily-revenue:", error);
+                res.status(500).send({ error: "Server error" });
+            }
+        });
+
         app.get("/top-items", async (req, res) => {
-            const payments = await paymentCollection.find({}).toArray();
+            try {
+                const payments = await paymentCollection.find({}).toArray();
+                const itemMap = {};
 
-            const itemMap = {};
+                payments.forEach(payment => {
+                    if (Array.isArray(payment.items)) {
+                        payment.items.forEach(item => {
+                            const key = item.foodName;
 
-            payments.forEach(payment => {
-                if (Array.isArray(payment.items)) {
-                    payment.items.forEach(item => {
-                        const key = item.foodName;
+                            if (!itemMap[key]) {
+                                itemMap[key] = {
+                                    foodName: item.foodName,
+                                    quantity: 0,
+                                    totalRevenue: 0,
+                                    restaurantRevenue: 0,
+                                    platformCommission: 0,
+                                    restaurantName: item.restaurantName
+                                };
+                            }
 
-                        if (!itemMap[key]) {
-                            itemMap[key] = {
-                                foodName: item.foodName,
-                                quantity: 0,
-                                totalRevenue: 0,
-                                restaurantRevenue: 0,
-                                platformCommission: 0,
-                                restaurantName: item.restaurantName
-                            };
-                        }
+                            const itemTotal = parseFloat(item.price) * parseInt(item.quantity);
+                            const commission = itemTotal * 0.05;
 
-                        const itemTotal = parseFloat(item.price);
-                        const commission = itemTotal * 0.05;
+                            itemMap[key].quantity += parseInt(item.quantity);
+                            itemMap[key].totalRevenue += itemTotal;
+                            itemMap[key].platformCommission += commission;
+                            itemMap[key].restaurantRevenue += (itemTotal - commission);
+                        });
+                    }
+                });
 
-                        itemMap[key].quantity += parseInt(item.quantity);
-                        itemMap[key].totalRevenue += itemTotal;
-                        itemMap[key].platformCommission += commission;
-                        itemMap[key].restaurantRevenue += (itemTotal - commission);
-                    });
-                }
-            });
+                const result = Object.values(itemMap)
+                    .sort((a, b) => b.quantity - a.quantity)
+                    .slice(0, 6);
 
-            const result = Object.values(itemMap)
-                .sort((a, b) => b.quantity - a.quantity)
-                .slice(0, 6); // top 6 items
-
-            res.send(result);
+                res.send(result);
+            } catch (error) {
+                console.error("Error in /top-items:", error);
+                res.status(500).send({ error: "Server error" });
+            }
         });
 
-        /// end
+        // end user and admin routes
+
+        // moderator routes
+
+        app.get("/users/moderator/:email", verifyToken, verifyModerator, async (req, res) => {
+            const email = req.params.email;
+            if (email !== req.decoded.email) {
+                return res.status(403).send({ message: "forbidden access" });
+            }
+            const query = { email: email };
+            const user = await usersCollection.findOne(query);
+            if (user?.role === "moderator") {
+                return res.send({ moderator: true });
+            }
+            res.send({ moderator: false });
+        });
         app.patch("/users/moderator/:id", verifyToken, verifyAdmin, async (req, res) => {
             const id = req.params.id;
             console.log(id);
@@ -311,17 +364,8 @@ async function run() {
             console.log(result);
             res.send(result)
         })
+        // Restaurant owner dashboard routes
 
-        const verifyOwner = async (req, res, next) => {
-            const email = req.decoded.email;
-            const query = { email };
-            const user = await usersCollection.findOne(query);
-            const isOwner = user?.role === "owner";
-            if (!isOwner) {
-                return res.status(403).send({ message: "forbidden access" });
-            }
-            next();
-        };
         app.get("/users/restaurantOwner/:email", verifyToken, async (req, res) => {
             const email = req.params.email;
             if (email !== req.decoded.email) {
@@ -351,101 +395,6 @@ async function run() {
             res.send(result)
         })
 
-
-        // restatuant 
-
-        app.get("/restaurantUpload", async (req, res) => {
-            const { email, restaurantName } = req.query;
-
-            if (email && restaurantName) {
-                try {
-                    const exists = await restaurantUploadCollection.findOne({ email, restaurantName });
-                    return res.send({ exists: !!exists });
-                } catch (error) {
-                    return res.status(500).send({ message: "Error checking restaurant", error });
-                }
-            }
-
-            try {
-                const result = await restaurantUploadCollection.find().toArray();
-                res.send(result);
-            } catch (error) {
-                res.status(500).send({ message: "Error retrieving restaurants", error });
-            }
-        });
-
-        app.post("/restaurantUpload", verifyToken, async (req, res) => {
-            const addFood = req.body;
-            const { email, restaurantName } = addFood;
-            const existing = await restaurantUploadCollection.findOne({ email, restaurantName });
-            if (existing) {
-                return res.status(409).send({ message: "Restaurant already exists for this user." });
-            }
-
-            const result = await restaurantUploadCollection.insertOne(addFood);
-            res.send(result);
-        });
-
-
-
-        app.get("/restaurantUpload/:restaurantName", async (req, res) => {
-            const restaurantName = req.params.restaurantName;
-            const query = { restaurantName: restaurantName };
-            const result = await restaurantUploadCollection.findOne(query);
-            res.send(result)
-        })
-        app.get("/restaurantUpload/:districtName", async (req, res) => {
-            const districtName = req.params.districtName;
-            const query = { districtName: districtName };
-            const result = await restaurantUploadCollection.find(query).toArray();
-            console.log(result);
-            res.send(result);
-        })
-        app.get("/restaurantUpload/:restaurantName", async (req, res) => {
-            const restaurantName = req.params.restaurantName;
-            const query = { restaurantName: restaurantName };
-            const result = await restaurantUploadCollection.findOne(query);
-            res.send(result);
-        });
-
-        app.get("/restaurantUpload/district/:districtName", async (req, res) => {
-            const districtName = req.params.districtName;
-            const query = { districtName: districtName };
-            const result = await restaurantUploadCollection.find(query).toArray();
-            console.log(result);
-            res.send(result);
-        });
-
-        app.delete("/restaurantUpload/:restaurantName", async (req, res) => {
-            const restaurantName = req.params.restaurantName;
-            const query = { restaurantName: restaurantName }
-            const result = await restaurantUploadCollection.deleteOne(query);
-            res.send(result);
-        })
-
-        // Add this route to your backend
-        // PATCH a review to a food item inside a restaurant
-        app.patch("/restaurantUpload/:restaurantName/:foodName", async (req, res) => {
-            const { restaurantName, foodName } = req.params;
-            const { reviewData } = req.body;
-
-            const query = {
-                restaurantName: restaurantName,
-                "foods.foodName": foodName,
-            };
-
-            const updateDoc = {
-                $push: {
-                    "foods.$.reviews": reviewData,
-                },
-            };
-
-            const result = await restaurantUploadCollection.updateOne(query, updateDoc);
-            res.send({ success: result.modifiedCount > 0 });
-        });
-
-
-        // owner dashboard routes
 
         app.get('/restaurantManage/:email', async (req, res) => {
             try {
@@ -527,7 +476,7 @@ async function run() {
                 res.status(404).send({ success: false, message: "Food not found" });
             }
         });
-        // Get restaurant payments with commission calculation
+
         app.get('/restaurantPayments/:email', verifyToken, verifyOwner, async (req, res) => {
             try {
                 const email = req.params.email;
@@ -545,10 +494,10 @@ async function run() {
                 // Find all payments where items contain this restaurant's name
                 const payments = await paymentCollection.find({
                     'items.restaurantName': restaurant.restaurantName,
-                    status: 'success' // Only successful payments
+                    status: 'success'
                 }).sort({ date: -1 }).toArray();
 
-                // Calculate totals
+
                 const totals = payments.reduce((acc, payment) => {
                     const restaurantItems = payment.items.filter(
                         item => item.restaurantName === restaurant.restaurantName
@@ -559,7 +508,7 @@ async function run() {
                         0
                     );
 
-                    const commission = paymentTotal * 0.05; // 5% commission
+                    const commission = paymentTotal * 0.05;
                     const earnings = paymentTotal - commission;
 
                     return {
@@ -584,7 +533,6 @@ async function run() {
             }
         });
 
-        // Get restaurant revenue summary
         app.get('/restaurantRevenue/:email', verifyToken, verifyOwner, async (req, res) => {
             try {
                 const email = req.params.email;
@@ -700,44 +648,95 @@ async function run() {
                 res.status(500).json({ message: 'Internal Server Error' });
             }
         });
+        // Restaurant Routes
+        app.get("/restaurantUpload", async (req, res) => {
+            const { email, restaurantName } = req.query;
 
-        // Fetch reviews for a restaurant
-        // Express Route Example
-        // app.post('/reviews', async (req, res) => {
-        //     try {
-        //         const review = new reviewCollection(req.body);
-        //         const result = await review.save();
-        //         res.send({ insertedId: result._id });
-        //     } catch (error) {
-        //         res.status(500).send({ error: 'Failed to save review' });
-        //     }
-        // });
-        // app.get('/reviews/restaurant/:id', async (req, res) => {
-        //     try {
-        //         const reviews = await reviewCollection.find({ restaurantId: req.params.id })
-        //             .sort({ date: -1 })
-        //             .limit(50);
-        //         res.send(reviews);
-        //     } catch (error) {
-        //         res.status(500).send({ error: 'Failed to fetch reviews' });
-        //     }
-        // });
+            if (email && restaurantName) {
+                try {
+                    const exists = await restaurantUploadCollection.findOne({ email, restaurantName });
+                    return res.send({ exists: !!exists });
+                } catch (error) {
+                    return res.status(500).send({ message: "Error checking restaurant", error });
+                }
+            }
+
+            try {
+                const result = await restaurantUploadCollection.find().toArray();
+                res.send(result);
+            } catch (error) {
+                res.status(500).send({ message: "Error retrieving restaurants", error });
+            }
+        });
+
+        app.post("/restaurantUpload", verifyToken, async (req, res) => {
+            const addFood = req.body;
+            const { email, restaurantName } = addFood;
+            const existing = await restaurantUploadCollection.findOne({ email, restaurantName });
+            if (existing) {
+                return res.status(409).send({ message: "Restaurant already exists for this user." });
+            }
+
+            const result = await restaurantUploadCollection.insertOne(addFood);
+            res.send(result);
+        });
+        app.get("/restaurantUpload/:restaurantName", async (req, res) => {
+            const restaurantName = req.params.restaurantName;
+            const query = { restaurantName: restaurantName };
+            const result = await restaurantUploadCollection.findOne(query);
+            res.send(result)
+        })
+        app.get("/restaurantUpload/:districtName", async (req, res) => {
+            const districtName = req.params.districtName;
+            const query = { districtName: districtName };
+            const result = await restaurantUploadCollection.find(query).toArray();
+            console.log(result);
+            res.send(result);
+        })
+        app.get("/restaurantUpload/:restaurantName", async (req, res) => {
+            const restaurantName = req.params.restaurantName;
+            const query = { restaurantName: restaurantName };
+            const result = await restaurantUploadCollection.findOne(query);
+            res.send(result);
+        });
+
+        app.get("/restaurantUpload/district/:districtName", async (req, res) => {
+            const districtName = req.params.districtName;
+            const query = { districtName: districtName };
+            const result = await restaurantUploadCollection.find(query).toArray();
+            console.log(result);
+            res.send(result);
+        });
+
+        app.delete("/restaurantUpload/:restaurantName", async (req, res) => {
+            const restaurantName = req.params.restaurantName;
+            const query = { restaurantName: restaurantName }
+            const result = await restaurantUploadCollection.deleteOne(query);
+            res.send(result);
+        })
 
 
-        // end owner dashboard
+        app.patch("/restaurantUpload/:restaurantName/:foodName", async (req, res) => {
+            const { restaurantName, foodName } = req.params;
+            const { reviewData } = req.body;
 
-        // // Foods Related  api 
-        // app.get("/foods", verifyToken, verifyAdmin, verifyModerator, verifyOwner, async (req, res) => {
-        //     const result = await foodsCollection.find().toArray();
-        //     res.send(result)
-        // })
+            const query = {
+                restaurantName: restaurantName,
+                "foods.foodName": foodName,
+            };
 
-        // app.delete("/foods/:id", async (req, res) => {
-        //     const id = req.params.id;
-        //     const query = { _id: new ObjectId(id) };
-        //     const result = await foodsCollection.deleteOne(query);
-        //     res.send(result)
-        // })
+            const updateDoc = {
+                $push: {
+                    "foods.$.reviews": reviewData,
+                },
+            };
+
+            const result = await restaurantUploadCollection.updateOne(query, updateDoc);
+            res.send({ success: result.modifiedCount > 0 });
+        });
+
+
+
 
         // SSL Commerce Payment Intent
         app.post("/create-ssl-payment", verifyToken, async (req, res) => {
@@ -852,7 +851,7 @@ async function run() {
                 res.status(500).json({ error: "Internal server error" });
             }
         });
-
+        // stripe
         app.post('/create-payment-intent', async (req, res) => {
             try {
                 const { price } = req.body;
@@ -911,7 +910,6 @@ async function run() {
             res.send(result)
         });
 
-        // admin revenue
 
         // addfood cart api 
         app.get("/addFood", async (req, res) => {
@@ -959,12 +957,12 @@ async function run() {
         });
         app.patch("/addFood/:id", async (req, res) => {
             const id = req.params.id;
-            const { quantity } = req.body; // Extract updated quantity
+            const { quantity } = req.body;
 
             try {
                 const query = { _id: new ObjectId(id) };
                 const updateDoc = {
-                    $set: { quantity: parseInt(quantity) }, // Update the quantity field
+                    $set: { quantity: parseInt(quantity) },
                 };
 
                 const result = await addFoodCollection.updateOne(query, updateDoc);
