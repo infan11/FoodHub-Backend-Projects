@@ -138,14 +138,25 @@ async function run() {
             res.send(result);
         });
 
-        app.delete("/users/:id", verifyToken, verifyAdmin, async (req, res) => {
+        app.delete("/users/:id", verifyToken, async (req, res) => {
             const id = req.params.id;
             const query = { _id: new ObjectId(id) }
             const result = await usersCollection.deleteOne(query);
             console.log(result);
             res.send(result)
         })
-
+        app.patch('/users/user/:id', verifyToken, async (req, res) => {
+            const id = req.params.id;
+            try {
+              const result = await usersCollection.updateOne(
+                { _id: new ObjectId(id) },
+                { $set: { role: 'user' } }
+              );
+              res.send(result);
+            } catch (err) {
+              res.status(500).send({ error: 'Failed to update to user', details: err });
+            }
+          });
         // admin routes
 
         app.get("/users/admin/:email", verifyToken, verifyAdmin, async (req, res) => {
