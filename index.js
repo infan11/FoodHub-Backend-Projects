@@ -148,15 +148,15 @@ async function run() {
         app.patch('/users/user/:id', verifyToken, async (req, res) => {
             const id = req.params.id;
             try {
-              const result = await usersCollection.updateOne(
-                { _id: new ObjectId(id) },
-                { $set: { role: 'user' } }
-              );
-              res.send(result);
+                const result = await usersCollection.updateOne(
+                    { _id: new ObjectId(id) },
+                    { $set: { role: 'user' } }
+                );
+                res.send(result);
             } catch (err) {
-              res.status(500).send({ error: 'Failed to update to user', details: err });
+                res.status(500).send({ error: 'Failed to update to user', details: err });
             }
-          });
+        });
         // admin routes
 
         app.get("/users/admin/:email", verifyToken, verifyAdmin, async (req, res) => {
@@ -727,9 +727,11 @@ async function run() {
         })
 
 
+        // Server API Endpoints
         app.patch("/restaurantUpload/:restaurantName/:foodName", async (req, res) => {
             const { restaurantName, foodName } = req.params;
             const { reviewData } = req.body;
+            reviewData._id = new ObjectId();
 
             const query = {
                 restaurantName: restaurantName,
@@ -746,7 +748,56 @@ async function run() {
             res.send({ success: result.modifiedCount > 0 });
         });
 
+        app.patch('/addReplyToReview', async (req, res) => {
+            const { restaurantName, foodName, reviewId, reply } = req.body;
 
+            try {
+                const result = await restaurantUploadCollection.updateOne(
+                    {
+                        restaurantName: restaurantName,
+                        "foods.foodName": foodName,
+                        "foods.reviews._id": new ObjectId(reviewId)
+                    },
+                    {
+                        $set: {
+                            "foods.$[food].reviews.$[review].reply": reply,
+                            "foods.$[food].reviews.$[review].replyDate": new Date()
+                        }
+                    },
+                    {
+                        arrayFilters: [
+                            { "food.foodName": foodName },
+                            { "review._id": new ObjectId(reviewId) }
+                        ]
+                    }
+                );
+
+                res.send({ success: result.modifiedCount > 0 });
+            } catch (error) {
+                console.error('Error adding reply:', error);
+                res.status(500).send({ success: false, error: 'Internal server error' });
+            }
+        });
+        app.get('/getFoodReviews', async (req, res) => {
+            const { restaurantName, foodName } = req.query;
+
+            try {
+                const restaurant = await restaurantUploadCollection.findOne({
+                    restaurantName,
+                    "foods.foodName": foodName
+                });
+
+                if (!restaurant) {
+                    return res.send({ reviews: [] });
+                }
+
+                const foodItem = restaurant.foods.find(f => f.foodName === foodName);
+                res.send({ reviews: foodItem.reviews || [] });
+            } catch (error) {
+                console.error('Error fetching reviews:', error);
+                res.status(500).send({ error: 'Failed to fetch reviews' });
+            }
+        });
 
 
         // SSL Commerce Payment Intent
