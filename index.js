@@ -731,6 +731,8 @@ async function run() {
         app.patch("/restaurantUpload/:restaurantName/:foodName", async (req, res) => {
             const { restaurantName, foodName } = req.params;
             const { reviewData } = req.body;
+
+
             reviewData._id = new ObjectId();
 
             const query = {
@@ -801,7 +803,7 @@ async function run() {
 
 
         // SSL Commerce Payment Intent
-        app.post("/create-ssl-payment", verifyToken, async (req, res) => {
+        app.post("/create-ssl-payment", async (req, res) => {
 
             const payment = req.body;
             console.log("Received Payment Data:", payment);
@@ -814,10 +816,10 @@ async function run() {
                 total_amount: parseFloat(payment.foodPrice),
                 currency: "BDT",
                 tran_id: trxid,
-                success_url: "https://foodhub-d3e1e.web.app/dashboard/paymentHistory",
+                success_url: "http://localhost:5000/success-payment",
                 fail_url: "http://localhost:5173/dashboard/fail",
                 cancel_url: "http://localhost:5173/dashboard/cancel",
-                ipn_url: "http://localhost:5173/dashboard/ipn-success-payment",
+                ipn_url: "http://localhost:5000/ipn-success-payment",
                 shipping_method: "Courier",
                 product_name: payment.foodName || "Unknown",
                 product_category: payment.category || "General",
@@ -835,66 +837,57 @@ async function run() {
                 ship_postcode: '4700'
             };
 
-            // console.log("Sending Payment Request:", initiatePayment);
+            console.log("Sending Payment Request:", initiatePayment);
 
             const inResponse = await axios.post(
                 "https://sandbox.sslcommerz.com/gwprocess/v4/api.php",
-                new URLSearchParams(initiatePayment).toString(), // Ensure correct encoding
+                new URLSearchParams(initiatePayment).toString(),
                 {
                     headers: { "Content-Type": "application/x-www-form-urlencoded" },
                 }
             );
+            console.log("isResponse", inResponse);
             const saveData = await paymentCollection.insertOne(payment)
+            console.log("saveData", saveData);
             const gatewayPageURL = inResponse?.data?.GatewayPageURL;
             res.send({ gatewayPageURL })
 
 
-            // console.log(gatewayPageURL); 
+            console.log(gatewayPageURL);
         });
-        app.get("/success-payment", async (req, res) => {
-            try {
-                const { val_id, tran_id } = req.query;
-                if (!val_id) {
-                    return res.status(400).send("val_id missing");
-                }
+        
 
-                const validationURL = `https://sandbox.sslcommerz.com/validator/api/validationserverAPI.php?val_id=${val_id}&store_id=foodh67aed7546ec54&store_passwd=foodh67aed7546ec54@ssl&format=json`;
+        app.post("/success-payment", async (req, res) => {
+            const paymentSuccess = req.body;
+            console.log("paymentSuccess info", paymentSuccess);
+            const { data } = await axios.get(`https://sandbox.sslcommerz.com/validator/api/validationserverAPI.php?val_id=${paymentSuccess.val_id}&store_id=${process.env.SSL_COMMERCE_SECRET_ID}&store_passwd=${process.env.SSL_COMMERCE_SECRET_PASS}&format=json`)
+            console.log("isValidPayment", data);
 
-                const { data } = await axios.get(validationURL);
-                //   console.log("SSLCommerz Validation Response:", data);
-
-                if (data.status !== "VALID" && data.status !== "VALIDATED") {
-                    // return res.status(400).send({ message: "Invalid Payment" });
-                }
-
-                const payment = await paymentCollection.findOne({ transactionId: tran_id });
-                //   if (!payment) return res.status(404).send({ message: "Transaction ID not found" });
-
-                const update = await paymentCollection.updateOne(
-                    { transactionId: tran_id },
-                    { $set: { status: "success" } }
-                );
-
-                if (update.modifiedCount > 0) {
-                    console.log(" Payment updated successfully");
-
-                    // Optionally delete cart
-                    const deletedResult = await addFoodCollection.deleteMany(query);
-
-                    return res.send({ deletedResult });
-
-                } else {
-                    return res.status(500).send({ message: "Failed to update payment" });
-                }
-            } catch (err) {
-                console.error(" Error in success-payment:", err);
-                res.status(500).send({ message: "Server Error" });
+            if (data.status !== "VALID") {
+                return res.send({ message: "Invalid Payment" })
             }
-            return res.redirect("https://foodhub-d3e1e.web.app/dashboard/paymentHistory");
-        });
+            const updatePayment = await paymentCollection.updateOne(
+                { transactionId: data.tran_id },
+                {
+                    $set: {
+                        status: "success"
+                    }
+                }
+            )
+            console.log("updatePayment", updatePayment);
+            const payment = await paymentCollection.findOne({ transactionId: data.tran_id })
+            console.log("payment info" , payment) ;
+            const query = {
+                _id: {
+                    $in : payment.items.map((item) => new ObjectId(item.foodId))
+                }
+            }
+            const deletedResult = await addFoodCollection.deleteMany(query)
+            console.log("Deleted Result" , deletedResult)
+            res.redirect("http://localhost:5173/dashboard/paymentHistory")
+        })
 
-        // Import express and MongoDB client before this snippet
-        // Assume 'client' is your connected MongoDB client
+
 
         app.get('/payments', verifyToken, async (req, res) => {
             try {
@@ -920,7 +913,7 @@ async function run() {
                 if (!price) {
                     return res.status(400).json({ error: "Price is required" });
                 }
-                const amount = parseInt(price * 100); // Convert to cents
+                const amount = parseInt(price * 100); // 
                 console.log("Creating PaymentIntent with amount:", amount);
 
                 const paymentIntent = await stripe.paymentIntents.create({
